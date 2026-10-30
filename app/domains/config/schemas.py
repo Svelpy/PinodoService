@@ -199,8 +199,18 @@ class ConfigUpdate(BaseModel):
         extra="forbid",
         json_schema_extra={
             "example": {
+                "nombre_tienda": "Tienda Moda",
+                "descripcion": "Ropa para mujer, hombre y niños.",
+                "logo_url": "https://res.cloudinary.com/demo/image/upload/logo.png",
+                "favicon_url": "https://res.cloudinary.com/demo/image/upload/favicon.png",
+                "email_contacto": "contacto@tienda.com",
+                "telefono": "71234567",
                 "whatsapp": None,
+                "direccion": "Avenida Principal 123",
+                "map_url": "https://maps.google.com/?q=-17.78,-63.18",
+                "ciudad": "Santa Cruz",
                 "horario": {"lunes": "09:00-21:00"},
+                "redes_sociales": {"instagram": "https://instagram.com/tiendamoda"},
                 "en_mantenimiento": True,
             }
         },

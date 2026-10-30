@@ -45,9 +45,9 @@ ROLE_PERMISSIONS: dict[Role, dict[Module, set[Action]]] = {
         Module.SKU: ALL_ACTIONS,
     },
     Role.ADMIN: {
-        Module.USUARIO: ALL_ACTIONS,
-        Module.CONFIG: ALL_ACTIONS,
-        Module.SECCION: ALL_ACTIONS,
+        # Sin Module.USUARIO: no tiene roles inferiores que gestionar.
+        Module.CONFIG: SOLO_LECTURA,
+        Module.SECCION: SIN_ELIMINAR,
         Module.CATEGORIA: ALL_ACTIONS,
         Module.PRODUCTO: ALL_ACTIONS,
         Module.CATEGORIA_PRODUCTO: ALL_ACTIONS,

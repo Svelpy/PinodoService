@@ -203,6 +203,30 @@ deleted_at
 
 cuando corresponda.
 
+### Eliminación con dependientes
+
+Al eliminar un registro, lo que ocurre con los registros que dependen de él
+lo determina el tipo de foreign key con que lo apuntan (§6):
+
+- Hijos (foreign key de dueño): se eliminan lógicamente en cascada, en la
+  misma transacción y con los mismos `deleted_at` y `deleted_by`. Solo afecta
+  a los registros activos.
+- Registros que lo usan como referencia: bloquean la eliminación con `409`
+  mientras estén activos. Para retirar un registro compartido sin eliminarlo
+  se usa `is_visible` u otro estado equivalente.
+- Enlaces N:M sin datos propios (§9): se eliminan lógicamente en cascada al
+  eliminar cualquiera de sus extremos.
+- Jerarquía autorreferenciada: la eliminación se bloquea mientras el registro
+  tenga hijos activos.
+
+La cascada la coordina el service del registro eliminado; los repositories
+exponen las operaciones de marcado y no hacen commit. No se usa
+`ON DELETE CASCADE`: con eliminación lógica no hay borrado físico que
+propagar.
+
+Una referencia queda libre cuando los registros que la usaban se eliminan,
+incluso si fue por una cascada.
+
 ---
 
 ## 6. Schemas
@@ -493,6 +517,40 @@ en el `response_model`, los permisos de acceso, la información expuesta y las
 relaciones que el repository carga para el `Detail`.
 
 `GET /me` y `PATCH /me` deben reutilizar `get` y `update` cuando la lógica sea equivalente.
+
+### Tablas de enlace N:M
+
+Una tabla de enlace N:M sin columnas propias, aparte de las de auditoría, no
+se expone como recurso: no tiene CRUD, `GET /{id}` ni `PATCH`. La relación se
+gestiona desde el extremo con menos relaciones, mediante una sub-ruta de ese
+padre que reemplaza el conjunto completo:
+
+```text
+PUT /<padre>/{id}/<relacion>    body: {"<relacion>_ids": [...]}
+```
+
+Ejemplo: `PUT /productos/{id}/categorias` con
+`{"categoria_ids": [A, B]}` reemplaza todas las categorías del producto. Si
+tenía `[A, C]`:
+
+- `A` se conserva sin cambios, con su auditoría original;
+- `C` se elimina lógicamente;
+- `B` se crea;
+- `[]` quita todas las categorías;
+- repetir la misma petición no produce cambios.
+
+Todo ocurre en una sola transacción, y cada id se valida con las mismas
+reglas que una creación individual.
+
+Las lecturas no necesitan rutas propias: el `Detail` del padre embebe la
+relación (§6), y el listado del otro extremo admite un filtro por el padre,
+por ejemplo `GET /productos?categoria_id=`. Por eso el dominio de enlace no
+define `ListItem` ni `Detail`, y en §20 no tiene segunda vuelta. Su endpoint
+vive en el `routes.py` del dominio de enlace, para que su lógica no se
+mezcle con la del padre.
+
+Si el enlace tiene datos propios, como un orden, un rol o una cantidad, es un
+recurso de asociación y sigue el CRUD estándar.
 
 ---
 
@@ -861,7 +919,60 @@ de imports.
 
 ---
 
-## 20. Reglas para cambios
+## 20. Orden de construcción de un backend nuevo
+
+### Etapa horizontal: todos los dominios a la vez
+
+1. Models de todas las tablas y una única migración inicial.
+2. Validadores reutilizables en `shared/services/validators.py`.
+3. Schemas de todos los dominios, en dos rondas:
+   - Ronda 1: `Create`, `Update`, `Response` y `ResponseAudit`.
+   - Ronda 2: `ListItem` y `Detail` de los dominios con foreign keys.
+
+   Cada ronda se valida con sus tests de schemas.
+
+Esta etapa es horizontal porque models y schemas son declarativos y
+dependen entre sí: un `Detail` embebe schemas de otros dominios, y la base
+de datos se diseña y migra completa de una vez.
+
+### Etapa vertical: un dominio por vez
+
+Cada dominio recibe su repository, service, routes, tests y prueba contra la
+base de datos de desarrollo, en este orden:
+
+1. Dominios sin foreign keys, completos.
+2. Primera vuelta de los dominios con foreign keys, de padres a hijos. Un
+   dominio se implementa cuando ya existen los dominios a los que apuntan sus
+   foreign keys.
+   - CRUD completo.
+   - `GET /` devuelve `PaginatedResponse[Response]` y `GET /{id}` devuelve
+     `Response`.
+   - Sin `Relationship()` ni carga de embebidos.
+3. Segunda vuelta de los dominios con foreign keys, de hijos a padres.
+   - Se declaran los `Relationship()`.
+   - El repository carga los embebidos.
+   - `GET /` pasa a `PaginatedResponse[ListItem]` y `GET /{id}` a `Detail`.
+   - Cada `Detail` se prueba con datos reales de todo su árbol.
+
+La segunda vuelta no empieza hasta terminar la primera de todos los
+dominios: el `Detail` de un dueño embebe a sus hijos, y solo puede probarse
+con datos reales cuando todos sus hijos ya se pueden crear.
+
+Un dominio sin hijos en otros dominios (solo referencias o jerarquía
+autorreferenciada) puede completar ambas vueltas a la vez.
+
+Entre ambas vueltas se acepta que los dominios con foreign keys no cumplan
+todavía la tabla de schemas por endpoint de §9. El cambio posterior es
+compatible, porque `ListItem` y `Detail` contienen todos los campos de
+`Response`.
+
+Los cambios posteriores a la construcción inicial, como un campo o un
+dominio nuevo, no repiten este orden: se aplican directamente en las capas
+afectadas, con su propia migration.
+
+---
+
+## 21. Reglas para cambios
 
 Antes de modificar código:
 
@@ -883,7 +994,7 @@ Antes de modificar código:
 
 ---
 
-## 21. Protección de la documentación
+## 22. Protección de la documentación
 
 Los archivos Markdown no se modifican como efecto secundario de implementar
 un cambio funcional. En particular, `AGENTS.md` y `ARCHITECTURE.md` describen
@@ -909,7 +1020,7 @@ alterar `AGENTS.md` ni `ARCHITECTURE.md`.
 
 ---
 
-## 22. Cuándo consultar `ARCHITECTURE.md`
+## 23. Cuándo consultar `ARCHITECTURE.md`
 
 No leer `ARCHITECTURE.md` antes de cada cambio.
 

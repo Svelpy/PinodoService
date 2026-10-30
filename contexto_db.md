@@ -52,7 +52,7 @@ Además de los campos propios listados, cada tabla (excepto `config`) tiene los 
 - `nombre` varchar(100), `slug` varchar(120) único activo, `is_visible`.
 
 **categorias**: árbol del menú (Colección › Cazadoras › Bombers).
-- `seccion_id` → secciones, `parent_id` → categorias (nulo = raíz), `nombre`, `slug` único activo, `is_visible`.
+- `seccion_id` → secciones, `parent_id` → categorias (nulo = raíz), `nombre`, `slug` único activo dentro de su sección (`seccion_id`, `slug`), `is_visible`.
 
 **categoria_productos**: enlace N:M entre categorías y productos. Un producto puede estar en varias categorías.
 - `categoria_id` → categorias, `producto_id` → productos.
@@ -67,14 +67,14 @@ Jerarquía: **producto → producto_colores → skus**. El SKU (color × talla) 
 - `seccion_id` → secciones, `nombre` varchar(200), `descripcion`, `cuidados`, `composicion` (text), `is_visible`.
 
 **colores**: catálogo general de colores.
-- `nombre` varchar(60) único activo, `codigo_hex` varchar(7).
+- `nombre` varchar(60), `slug` varchar(80) único activo (interno: evita duplicados como "Azul marino" / "azúl  marino"; no se usa en URLs), `codigo_hex` varchar(7).
 
 **producto_colores**: cada color disponible de un producto.
 - `producto_id` → productos, `color_id` → colores (obligatorio), `is_visible`.
 - Único activo: (`producto_id`, `color_id`).
 
 **imagenes**: fotos de un color de producto.
-- `producto_color_id` → producto_colores, `url` varchar(500), `tipo` varchar(20) (por defecto `modelo`; valores: modelo, detalle, bodegon).
+- `producto_color_id` → producto_colores, `url` varchar(500), `tipo` varchar(20) (por defecto `MODELO`; valores: MODELO, PRENDA, DETALLE).
 
 **tallas**: lista única de tallas (sin sistemas de talla).
 - `etiqueta` varchar(30) único activo (S, M, 38, "6-7 años").

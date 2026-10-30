@@ -205,7 +205,11 @@ class SkuUpdate(BaseModel):
         extra="forbid",
         json_schema_extra={
             "example": {
+                "talla_id": "99999999-9999-4999-8999-999999999999",
+                "codigo_barras": "8412345678905",
+                "is_visible": True,
                 "precio": {"normal": 29.95, "rebajado": 19.95, "rebaja_hasta": "2026-12-31"},
+                "stock": {"cantidad": 20, "minimo": 3},
             }
         },
     )

@@ -45,6 +45,7 @@ class CategoriaProductoUpdate(BaseModel):
         json_schema_extra={
             "example": {
                 "categoria_id": "66666666-6666-4666-8666-666666666666",
+                "producto_id": "55555555-5555-4555-8555-555555555555",
             }
         },
     )
@@ -117,3 +118,38 @@ class CategoriaProductoListItem(CategoriaProductoResponse):
 
 class CategoriaProductoDetail(CategoriaProductoListItem):
     """Sin hijos propios: no añade campos respecto a CategoriaProductoListItem."""
+
+
+class ProductoCategoriasUpdate(BaseModel):
+    """
+    Conjunto completo de categorías de un producto (AGENTS.md §9, tablas de enlace).
+
+    Reemplaza las categorías actuales; [] las quita todas. Los ids repetidos se
+    ignoran conservando el orden de la primera aparición.
+    """
+
+    categoria_ids: list[UUID] = Field(..., max_length=100)
+
+    @field_validator("categoria_ids", mode="before")
+    @classmethod
+    def validate_categoria_ids(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("categoria_ids no puede ser null; usa [] para quitar todas.")
+        return value
+
+    @field_validator("categoria_ids")
+    @classmethod
+    def remove_duplicates(cls, value: list[UUID]) -> list[UUID]:
+        return list(dict.fromkeys(value))
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "categoria_ids": [
+                    "44444444-4444-4444-8444-444444444444",
+                    "66666666-6666-4666-8666-666666666666",
+                ],
+            }
+        },
+    )

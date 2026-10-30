@@ -60,7 +60,7 @@ def _producto_orm() -> SimpleNamespace:
     seccion = Seccion(nombre="Hombre", slug="hombre")
     producto = Producto(seccion_id=seccion.id, nombre="Camisa Oxford")
     categoria = Categoria(seccion_id=seccion.id, nombre="Camisas", slug="camisas")
-    color = Color(nombre="Azul", codigo_hex="#1E3A8A")
+    color = Color(nombre="Azul", slug="azul", codigo_hex="#1E3A8A")
     producto_color = ProductoColor(producto_id=producto.id, color_id=color.id)
     talla = Talla(etiqueta="M")
     sku = Sku(producto_color_id=producto_color.id, talla_id=talla.id, precio={"normal": 29.95})

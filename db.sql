@@ -96,7 +96,7 @@ CREATE TABLE "public"."categorias" (
 CREATE INDEX "categorias_idx_categorias_parent" ON "public"."categorias" ("parent_id");
 CREATE INDEX "categorias_idx_categorias_seccion" ON "public"."categorias" ("seccion_id");
 CREATE INDEX "categorias_idx_is_deleted" ON "public"."categorias" ("is_deleted");
-CREATE UNIQUE INDEX "uq_categorias_slug" ON "public"."categorias" ("slug") WHERE "is_deleted" = FALSE;
+CREATE UNIQUE INDEX "uq_categorias_seccion_slug" ON "public"."categorias" ("seccion_id", "slug") WHERE "is_deleted" = FALSE;
 
 -- ---------------------------------------------------------------------
 -- PRODUCTO
@@ -143,6 +143,7 @@ CREATE UNIQUE INDEX "uq_categoria_productos" ON "public"."categoria_productos" (
 CREATE TABLE "public"."colores" (
     "id" uuid NOT NULL,
     "nombre" varchar(60) NOT NULL,
+    "slug" varchar(80) NOT NULL,
     "codigo_hex" varchar(7) NOT NULL,
     "created_at" timestamptz NOT NULL DEFAULT now(),
     "created_by" uuid,
@@ -154,7 +155,7 @@ CREATE TABLE "public"."colores" (
     PRIMARY KEY ("id")
 );
 CREATE INDEX "colores_idx_is_deleted" ON "public"."colores" ("is_deleted");
-CREATE UNIQUE INDEX "uq_colores_nombre" ON "public"."colores" ("nombre") WHERE "is_deleted" = FALSE;
+CREATE UNIQUE INDEX "uq_colores_slug" ON "public"."colores" ("slug") WHERE "is_deleted" = FALSE;
 
 CREATE TABLE "public"."producto_colores" (
     "id" uuid NOT NULL,
@@ -178,7 +179,7 @@ CREATE TABLE "public"."imagenes" (
     "id" uuid NOT NULL,
     "producto_color_id" uuid NOT NULL,
     "url" varchar(500) NOT NULL,
-    "tipo" varchar(20) NOT NULL DEFAULT 'modelo',
+    "tipo" varchar(20) NOT NULL DEFAULT 'MODELO',
     "created_at" timestamptz NOT NULL DEFAULT now(),
     "created_by" uuid,
     "updated_at" timestamptz NOT NULL DEFAULT now(),

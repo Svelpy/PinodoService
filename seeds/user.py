@@ -33,7 +33,6 @@ def build_seed_admins(settings: Settings) -> list[UsuarioCreate]:
                 password=password.get_secret_value() if password is not None else None,
                 nombre=getattr(settings, f"SEED_ADMIN_NAME_{position}"),
                 apellidos=getattr(settings, f"SEED_ADMIN_LASTNAME_{position}"),
-                telefono=getattr(settings, f"SEED_ADMIN_PHONE_{position}"),
                 rol=Role.SUPERADMIN,
             )
         except ValidationError as error:

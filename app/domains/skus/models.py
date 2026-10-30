@@ -1,11 +1,12 @@
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Index, text
+from sqlalchemy import Index, select, text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlmodel import Field
+from sqlmodel import Field, Relationship
 
 from app.core.base_model import BaseModel
+from app.domains.tallas.models import Talla
 
 
 def default_precio() -> dict[str, Any]:
@@ -42,3 +43,12 @@ class Sku(BaseModel, table=True):
     is_visible: bool = Field(default=True, nullable=False)
     precio: dict[str, Any] = Field(default_factory=default_precio,sa_type=JSONB,nullable=False)
     stock: dict[str, Any] = Field(default_factory=default_stock,sa_type=JSONB,nullable=False)
+
+    talla: Talla = Relationship(sa_relationship_kwargs={"lazy": "raise"})
+
+
+# Orden de los SKUs de un color: el orden de creación de sus tallas.
+SKU_TALLA_ORDER = (
+    select(Talla.created_at).where(Talla.id == Sku.talla_id).scalar_subquery(),
+    Sku.id,
+)

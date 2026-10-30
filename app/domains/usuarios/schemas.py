@@ -119,7 +119,9 @@ class UsuarioUpdateMe(BaseModel):
         extra="forbid",
         json_schema_extra={
             "example": {
+                "email": "ana@tienda.com",
                 "nombre": "Ana María",
+                "apellidos": "Pérez López",
                 "telefono": "71234567",
             }
         },
@@ -142,7 +144,10 @@ class UsuarioUpdate(UsuarioUpdateMe):
         extra="forbid",
         json_schema_extra={
             "example": {
+                "email": "ana@tienda.com",
+                "nombre": "Ana María",
                 "apellidos": None,
+                "telefono": "71234567",
                 "rol": "OWNER",
             }
         },

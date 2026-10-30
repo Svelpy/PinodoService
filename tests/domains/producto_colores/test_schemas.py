@@ -40,7 +40,7 @@ def test_producto_color_response_desde_modelo() -> None:
 
 
 def _producto_color_orm() -> SimpleNamespace:
-    color = Color(nombre="Azul", codigo_hex="#1E3A8A")
+    color = Color(nombre="Azul", slug="azul", codigo_hex="#1E3A8A")
     producto_color = ProductoColor(producto_id=uuid4(), color_id=color.id)
     talla = Talla(etiqueta="M")
     sku = Sku(producto_color_id=producto_color.id, talla_id=talla.id, precio={"normal": 29.95})

@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domains.secciones.schemas import SeccionResponse
+from app.shared.schemas.tree import TreeResponse
 from app.shared.services.validators import validator_boolean, validator_slug_source
 
 
@@ -73,8 +74,10 @@ class CategoriaUpdate(BaseModel):
         extra="forbid",
         json_schema_extra={
             "example": {
+                "seccion_id": "33333333-3333-4333-8333-333333333333",
                 "parent_id": None,
                 "nombre": "Cazadoras bomber",
+                "is_visible": True,
             }
         },
     )
@@ -175,6 +178,41 @@ class CategoriaDetail(CategoriaListItem):
                         "slug": "bombers-acolchadas",
                     }
                 ],
+            }
+        },
+    )
+
+
+class CategoriaArbolSeccion(BaseModel):
+    """Una sección con el árbol completo de sus categorías."""
+
+    seccion: SeccionResponse
+    categorias: TreeResponse[CategoriaResponse]
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "seccion": SeccionResponse.model_json_schema()["example"],
+                "categorias": {
+                    "total": 2,
+                    "data": [
+                        {
+                            "data": CategoriaResponse.model_json_schema()["example"],
+                            "children": [
+                                {
+                                    "data": {
+                                        **CategoriaResponse.model_json_schema()["example"],
+                                        "id": "66666666-6666-4666-8666-666666666666",
+                                        "parent_id": "11111111-1111-4111-8111-111111111111",
+                                        "nombre": "Bombers acolchadas",
+                                        "slug": "bombers-acolchadas",
+                                    },
+                                    "children": [],
+                                }
+                            ],
+                        }
+                    ],
+                },
             }
         },
     )

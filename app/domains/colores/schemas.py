@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.shared.services.validators import validator_hex_color, validator_non_empty_text
+from app.shared.services.validators import validator_hex_color, validator_slug_source
 
 
 class ColorCreate(BaseModel):
@@ -15,7 +15,7 @@ class ColorCreate(BaseModel):
     def validate_nombre(cls, value: object) -> str:
         if value is None:
             raise ValueError("El nombre no puede ser null.")
-        return validator_non_empty_text(value)
+        return validator_slug_source(value)
 
     @field_validator("codigo_hex", mode="before")
     @classmethod
@@ -44,7 +44,7 @@ class ColorUpdate(BaseModel):
     def validate_nombre(cls, value: object) -> str:
         if value is None:
             raise ValueError("El nombre no puede ser null.")
-        return validator_non_empty_text(value)
+        return validator_slug_source(value)
 
     @field_validator("codigo_hex", mode="before")
     @classmethod
@@ -57,6 +57,7 @@ class ColorUpdate(BaseModel):
         extra="forbid",
         json_schema_extra={
             "example": {
+                "nombre": "Azul marino",
                 "codigo_hex": "#172554",
             }
         },
@@ -66,6 +67,7 @@ class ColorUpdate(BaseModel):
 class ColorResponse(BaseModel):
     id: UUID
     nombre: str
+    slug: str
     codigo_hex: str
     created_at: datetime
     updated_at: datetime
@@ -76,6 +78,7 @@ class ColorResponse(BaseModel):
             "example": {
                 "id": "11111111-1111-4111-8111-111111111111",
                 "nombre": "Azul marino",
+                "slug": "azul-marino",
                 "codigo_hex": "#1E3A8A",
                 "created_at": "2026-10-29T14:30:00Z",
                 "updated_at": "2026-10-29T15:00:00Z",
@@ -97,6 +100,7 @@ class ColorResponseAudit(ColorResponse):
             "example": {
                 "id": "11111111-1111-4111-8111-111111111111",
                 "nombre": "Azul marino",
+                "slug": "azul-marino",
                 "codigo_hex": "#1E3A8A",
                 "created_at": "2026-10-29T14:30:00Z",
                 "created_by": "22222222-2222-4222-8222-222222222222",

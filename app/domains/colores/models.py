@@ -8,8 +8,8 @@ class Color(BaseModel, table=True):
     __tablename__ = "colores"
     __table_args__ = (
         Index(
-            "uq_colores_nombre",
-            "nombre",
+            "uq_colores_slug",
+            "slug",
             unique=True,
             postgresql_where=text("is_deleted = false"),
         ),
@@ -17,4 +17,5 @@ class Color(BaseModel, table=True):
     )
 
     nombre: str = Field(max_length=60, nullable=False)
+    slug: str = Field(max_length=80, nullable=False)
     codigo_hex: str = Field(max_length=7, nullable=False)

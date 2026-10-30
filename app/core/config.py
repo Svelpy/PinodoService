@@ -27,19 +27,16 @@ class Settings(BaseSettings):
     # =================================
     # Seeds
     # =================================
-    SEED_ADMIN_PHONE_1: str | None = None
     SEED_ADMIN_EMAIL_1: str | None = None
     SEED_ADMIN_NAME_1: str | None = None
     SEED_ADMIN_LASTNAME_1: str | None = None
     SEED_ADMIN_PASSWORD_1: SecretStr | None = None
 
-    SEED_ADMIN_PHONE_2: str | None = None
     SEED_ADMIN_EMAIL_2: str | None = None
     SEED_ADMIN_NAME_2: str | None = None
     SEED_ADMIN_LASTNAME_2: str | None = None
     SEED_ADMIN_PASSWORD_2: SecretStr | None = None
 
-    SEED_ADMIN_PHONE_3: str | None = None
     SEED_ADMIN_EMAIL_3: str | None = None
     SEED_ADMIN_NAME_3: str | None = None
     SEED_ADMIN_LASTNAME_3: str | None = None

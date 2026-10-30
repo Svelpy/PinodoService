@@ -25,6 +25,18 @@ def test_color_update_rechaza_null(field: str) -> None:
 
 
 def test_color_response_desde_modelo() -> None:
-    response = ColorResponse.model_validate(Color(nombre="Azul", codigo_hex="#1E3A8A"))
+    response = ColorResponse.model_validate(Color(nombre="Azul", slug="azul", codigo_hex="#1E3A8A"))
 
+    assert response.slug == "azul"
     assert response.codigo_hex == "#1E3A8A"
+
+
+@pytest.mark.parametrize("nombre", ["---", "   "])
+def test_color_rechaza_nombre_sin_slug(nombre: str) -> None:
+    with pytest.raises(ValidationError):
+        ColorCreate(nombre=nombre, codigo_hex="#1E3A8A")
+
+
+def test_color_create_rechaza_slug_del_cliente() -> None:
+    with pytest.raises(ValidationError):
+        ColorCreate.model_validate({"nombre": "Azul", "slug": "azul", "codigo_hex": "#1E3A8A"})

@@ -93,7 +93,11 @@ class ProductoUpdate(BaseModel):
         extra="forbid",
         json_schema_extra={
             "example": {
+                "seccion_id": "33333333-3333-4333-8333-333333333333",
+                "nombre": "Camisa Oxford slim",
+                "descripcion": "Camisa de corte slim confeccionada en tejido Oxford.",
                 "cuidados": None,
+                "composicion": "100 % algodón",
                 "is_visible": True,
             }
         },

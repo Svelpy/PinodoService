@@ -1,9 +1,10 @@
 from uuid import UUID
 
 from sqlalchemy import Index, text
-from sqlmodel import Field
+from sqlmodel import Field, Relationship
 
 from app.core.base_model import BaseModel
+from app.domains.secciones.models import Seccion
 
 
 class Categoria(BaseModel, table=True):
@@ -12,7 +13,8 @@ class Categoria(BaseModel, table=True):
         Index("categorias_idx_categorias_parent", "parent_id"),
         Index("categorias_idx_categorias_seccion", "seccion_id"),
         Index(
-            "uq_categorias_slug",
+            "uq_categorias_seccion_slug",
+            "seccion_id",
             "slug",
             unique=True,
             postgresql_where=text("is_deleted = false"),
@@ -25,3 +27,11 @@ class Categoria(BaseModel, table=True):
     nombre: str = Field(max_length=100, nullable=False)
     slug: str = Field(max_length=120, nullable=False)
     is_visible: bool = Field(default=True, nullable=False)
+
+    seccion: Seccion = Relationship(sa_relationship_kwargs={"lazy": "raise"})
+    subcategorias: list["Categoria"] = Relationship(
+        sa_relationship_kwargs={
+            "lazy": "raise",
+            "order_by": "(Categoria.created_at, Categoria.id)",
+        }
+    )
