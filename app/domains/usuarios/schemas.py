@@ -146,7 +146,7 @@ class UsuarioUpdate(UsuarioUpdateMe):
             "example": {
                 "email": "ana@tienda.com",
                 "nombre": "Ana María",
-                "apellidos": None,
+                "apellidos": "Pérez López",
                 "telefono": "71234567",
                 "rol": "OWNER",
             }
@@ -243,8 +243,8 @@ class UsuarioResponseAudit(UsuarioResponse):
                 "updated_at": "2026-10-29T15:00:00Z",
                 "updated_by": "22222222-2222-4222-8222-222222222222",
                 "is_deleted": False,
-                "deleted_at": None,
-                "deleted_by": None,
+                "deleted_at": "2026-10-30T09:00:00Z",
+                "deleted_by": "22222222-2222-4222-8222-222222222222",
             }
         },
     )

@@ -146,7 +146,7 @@ class SkuCreate(BaseModel):
                 "talla_id": "99999999-9999-4999-8999-999999999999",
                 "codigo_barras": "8412345678905",
                 "is_visible": True,
-                "precio": {"normal": 29.95, "rebajado": None, "rebaja_hasta": None},
+                "precio": {"normal": 29.95, "rebajado": 19.95, "rebaja_hasta": "2026-12-31"},
                 "stock": {"cantidad": 12, "minimo": 3},
             }
         },
@@ -267,8 +267,8 @@ class SkuResponseAudit(SkuResponse):
                 "updated_at": "2026-10-29T15:00:00Z",
                 "updated_by": "22222222-2222-4222-8222-222222222222",
                 "is_deleted": False,
-                "deleted_at": None,
-                "deleted_by": None,
+                "deleted_at": "2026-10-30T09:00:00Z",
+                "deleted_by": "22222222-2222-4222-8222-222222222222",
             }
         },
     )

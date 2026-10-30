@@ -205,7 +205,7 @@ class ConfigUpdate(BaseModel):
                 "favicon_url": "https://res.cloudinary.com/demo/image/upload/favicon.png",
                 "email_contacto": "contacto@tienda.com",
                 "telefono": "71234567",
-                "whatsapp": None,
+                "whatsapp": "+59171234567",
                 "direccion": "Avenida Principal 123",
                 "map_url": "https://maps.google.com/?q=-17.78,-63.18",
                 "ciudad": "Santa Cruz",

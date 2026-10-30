@@ -75,7 +75,7 @@ class CategoriaUpdate(BaseModel):
         json_schema_extra={
             "example": {
                 "seccion_id": "33333333-3333-4333-8333-333333333333",
-                "parent_id": None,
+                "parent_id": "44444444-4444-4444-8444-444444444444",
                 "nombre": "Cazadoras bomber",
                 "is_visible": True,
             }
@@ -132,8 +132,8 @@ class CategoriaResponseAudit(CategoriaResponse):
                 "updated_at": "2026-10-29T15:00:00Z",
                 "updated_by": "22222222-2222-4222-8222-222222222222",
                 "is_deleted": False,
-                "deleted_at": None,
-                "deleted_by": None,
+                "deleted_at": "2026-10-30T09:00:00Z",
+                "deleted_by": "22222222-2222-4222-8222-222222222222",
             }
         },
     )

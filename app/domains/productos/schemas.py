@@ -96,7 +96,7 @@ class ProductoUpdate(BaseModel):
                 "seccion_id": "33333333-3333-4333-8333-333333333333",
                 "nombre": "Camisa Oxford slim",
                 "descripcion": "Camisa de corte slim confeccionada en tejido Oxford.",
-                "cuidados": None,
+                "cuidados": "Lavar a máquina a 30 °C. No usar secadora.",
                 "composicion": "100 % algodón",
                 "is_visible": True,
             }
@@ -156,8 +156,8 @@ class ProductoResponseAudit(ProductoResponse):
                 "updated_at": "2026-10-29T15:00:00Z",
                 "updated_by": "22222222-2222-4222-8222-222222222222",
                 "is_deleted": False,
-                "deleted_at": None,
-                "deleted_by": None,
+                "deleted_at": "2026-10-30T09:00:00Z",
+                "deleted_by": "22222222-2222-4222-8222-222222222222",
             }
         },
     )
