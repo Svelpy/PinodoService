@@ -9,6 +9,7 @@ from app.core.database import (
     initialize_database,
 )
 from app.core.logging import setup_logging
+from app.core.openapi import setup_openapi
 from app.integrations.cloudinary import configure_cloudinary
 from app.middlewares import register_all_middlewares
 from app.api import api_router
@@ -52,6 +53,9 @@ register_all_middlewares(app,settings)
 
 # Registrar routers
 app.include_router(api_router)
+
+# Conservar en la documentación los ejemplos tal como están en los schemas
+setup_openapi(app)
 
 
 if __name__ == "__main__":

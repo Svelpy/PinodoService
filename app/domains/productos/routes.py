@@ -76,7 +76,7 @@ async def list_productos(
     response_model=ProductoResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Crear producto",
-    responses=_error_responses(401, 403, 409, 422, 500),
+    responses=_error_responses(401, 403, 422, 500),
 )
 async def create_producto(
     data: ProductoCreate,
@@ -157,7 +157,7 @@ async def update_producto(
         "Eliminación lógica en cascada: también elimina sus colores con sus "
         "imágenes y SKUs, y lo quita de sus categorías."
     ),
-    responses=_error_responses(401, 403, 404, 409, 422, 500),
+    responses=_error_responses(401, 403, 404, 422, 500),
 )
 async def delete_producto(
     producto_id: UUID,

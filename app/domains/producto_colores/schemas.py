@@ -106,7 +106,7 @@ class ProductoColorResponseAudit(ProductoColorResponse):
                 "created_by": "22222222-2222-4222-8222-222222222222",
                 "updated_at": "2026-10-29T15:00:00Z",
                 "updated_by": "22222222-2222-4222-8222-222222222222",
-                "is_deleted": False,
+                "is_deleted": True,
                 "deleted_at": "2026-10-30T09:00:00Z",
                 "deleted_by": "22222222-2222-4222-8222-222222222222",
             }

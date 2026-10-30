@@ -70,6 +70,7 @@ base_model.py
 config.py
 database.py
 logging.py
+openapi.py
 security.py
 system_router.py
 ```
@@ -283,6 +284,28 @@ model_dump(exclude_unset=True)
 No utilizar `exclude_none=True` para este flujo, porque eliminaría también los
 `None` enviados explícitamente y haría imposible limpiar campos nullable. Los
 valores explícitos `0` y `False` tampoco deben descartarse.
+
+### Ejemplos de documentación
+
+Todo schema expuesto en la API define un ejemplo:
+
+```python
+model_config = ConfigDict(json_schema_extra={"example": {...}})
+```
+
+El ejemplo:
+
+- contiene todos los campos del schema, incluidos los heredados y los
+  embebidos, en el orden en que se declaran;
+- no contiene valores `null`: un campo nullable se muestra con un valor de
+  ejemplo, porque el ejemplo documenta el tipo; la pestaña Schema de la
+  documentación indica qué campos admiten `null`;
+- pasa la validación de su propio schema;
+- es coherente entre campos; por ejemplo, un `ResponseAudit` con
+  `deleted_at` tiene `is_deleted: true`.
+
+`core/openapi.py` conserva estos ejemplos tal como están escritos, con su
+orden, al generar la documentación.
 
 ### Schemas de lectura con embebidos
 

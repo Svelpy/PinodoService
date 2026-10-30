@@ -158,7 +158,7 @@ async def update_producto_color(
         "Eliminación lógica en cascada: también elimina sus imágenes y SKUs. Los "
         "archivos de las imágenes se conservan en Cloudinary."
     ),
-    responses=_error_responses(401, 403, 404, 409, 422, 500),
+    responses=_error_responses(401, 403, 404, 422, 500),
 )
 async def delete_producto_color(
     producto_color_id: UUID,
