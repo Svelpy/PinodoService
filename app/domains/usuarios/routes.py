@@ -75,7 +75,13 @@ async def update_me(
     "/me/password",
     response_model=UsuarioResponse,
     summary="Cambiar mi contraseña",
-    description="Revoca todas las sesiones activas del usuario; debe iniciar sesión de nuevo.",
+    description=(
+        "Revoca todas las sesiones activas del usuario; debe iniciar sesión de nuevo. "
+        "Responde 422 VALIDATION_ERROR si new_password o current_password no tienen "
+        "entre 6 y 20 caracteres. Después verifica current_password: si es incorrecta "
+        "responde 400 AUTHENTICATION_FAILED. Si es correcta pero new_password es igual "
+        "a ella, responde 422 VALIDATION_ERROR."
+    ),
     responses=_error_responses(400, 401, 404, 422, 500),
 )
 async def change_my_password(
@@ -170,7 +176,7 @@ async def get_usuario_audit(
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> UsuarioResponseAudit:
-    return await UsuarioService.get(db_session, usuario_id)
+    return await UsuarioService.get(db_session, usuario_id, include_deleted=True)
 
 
 @router.patch(

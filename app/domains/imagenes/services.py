@@ -8,7 +8,13 @@ from app.core.config import Settings
 from app.core.logging import get_logger
 from app.domains.imagenes.models import Imagen
 from app.domains.imagenes.repositories import ImagenRepository
-from app.domains.imagenes.schemas import ImagenCreate, ImagenListItem, ImagenUpdate
+from app.domains.imagenes.schemas import (
+    ImagenBibliotecaItem,
+    ImagenCreate,
+    ImagenListItem,
+    ImagenResponse,
+    ImagenUpdate,
+)
 from app.domains.producto_colores.repositories import ProductoColorRepository
 from app.integrations.cloudinary import CloudinaryService
 from app.shared.enums import TipoImagen
@@ -90,6 +96,67 @@ class ImagenService:
             total_pages=(total + per_page - 1) // per_page,
             data=imagenes,
         )
+
+    @staticmethod
+    async def list_biblioteca(
+        db_session: AsyncSession,
+        *,
+        page: int = 1,
+        per_page: int = 20,
+        producto_id: UUID | None = None,
+        color_id: UUID | None = None,
+        tipo: TipoImagen | None = None,
+        nombre: str | None = None,
+    ) -> PaginatedResponse[ImagenBibliotecaItem]:
+        if page < 1:
+            raise AppException(
+                "La página debe ser mayor o igual a 1.",
+                422,
+                ErrorCode.VALIDATION_ERROR,
+            )
+        if per_page < 1 or per_page > 100:
+            raise AppException(
+                "La cantidad por página debe estar entre 1 y 100.",
+                422,
+                ErrorCode.VALIDATION_ERROR,
+            )
+
+        rows, total = await ImagenRepository(db_session).list_biblioteca(
+            offset=(page - 1) * per_page,
+            limit=per_page,
+            producto_id=producto_id,
+            color_id=color_id,
+            tipo=tipo,
+            nombre=nombre.strip() if nombre else None,
+        )
+        items = [
+            ImagenBibliotecaItem(
+                **ImagenResponse.model_validate(imagen).model_dump(),
+                producto_id=row_producto_id,
+                producto_nombre=producto_nombre,
+                color_id=row_color_id,
+                color_nombre=color_nombre,
+                color_codigo_hex=color_codigo_hex,
+            )
+            for imagen, row_producto_id, producto_nombre, row_color_id, color_nombre, color_codigo_hex in rows
+        ]
+        return PaginatedResponse[ImagenBibliotecaItem](
+            total=total,
+            page=page,
+            per_page=per_page,
+            total_pages=(total + per_page - 1) // per_page,
+            data=items,
+        )
+
+    @staticmethod
+    async def upload_pending(file: UploadFile, settings: Settings, actor_id: UUID) -> str:
+        """
+        Sube una imagen antes de que exista su color de producto y devuelve su
+        URL. No crea ningún registro: lo crea el create del producto al recibirla.
+        """
+        uploaded = await CloudinaryService.upload_pending(file, settings)
+        logger.info("Imagen pendiente subida: actor_id=%s url=%s", actor_id, uploaded["url"])
+        return uploaded["url"]
 
     @classmethod
     async def create(

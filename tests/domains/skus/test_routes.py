@@ -169,3 +169,45 @@ def test_audit_y_delete(
     assert audit.json()["is_deleted"] is False
     assert deleted.status_code == 204
     service.assert_awaited_once_with(db_session, sku.id, current_user.id)
+
+
+def test_inventario_pasa_filtros_y_no_choca_con_get_por_id(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    from app.domains.skus.schemas import SkuInventarioItem, SkuResponse
+
+    client, current_user, db_session = route_context
+    current_user.rol = Role.CAJERO
+    item = SkuInventarioItem(
+        **SkuResponse.model_validate(_sku()).model_dump(),
+        precio_vigente="19.95",
+        producto_id=uuid4(),
+        producto_nombre="Camisa Oxford",
+        color_id=uuid4(),
+        color_nombre="Azul",
+        color_codigo_hex="#1E3A8A",
+        talla_etiqueta="M",
+    )
+    page = PaginatedResponse(total=1, page=1, per_page=20, total_pages=1, data=[item])
+
+    with (
+        patch.object(SkuService, "list_inventario", new=AsyncMock(return_value=page)) as service,
+        patch.object(SkuService, "get", new=AsyncMock()) as get,
+    ):
+        response = client.get(
+            "/skus/inventario",
+            params={"codigo_barras": "8412345678905", "en_rebaja": "true"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()["data"][0]
+    assert body["precio_vigente"] == 19.95
+    assert (body["producto_nombre"], body["color_nombre"], body["talla_etiqueta"]) == (
+        "Camisa Oxford", "Azul", "M",
+    )
+    kwargs = service.await_args.kwargs
+    assert service.await_args.args[0] is db_session
+    assert kwargs["codigo_barras"] == "8412345678905"
+    assert kwargs["en_rebaja"] is True
+    assert kwargs["bajo_minimo"] is None
+    get.assert_not_awaited()

@@ -1,3 +1,4 @@
+import json
 import re
 import unicodedata
 from datetime import date, datetime
@@ -171,6 +172,24 @@ def validator_barcode(value: object) -> str:
             "El código de barras solo permite letras, dígitos y guiones, hasta 50 caracteres."
         )
     return normalized_code
+
+
+def validator_json_object(value: object) -> dict[str, object]:
+    """
+    Acepta un objeto o su texto JSON, como llega en multipart/form-data, y
+    devuelve el objeto.
+    """
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        raise ValueError("El valor debe ser un objeto JSON.")
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise ValueError("El valor debe ser un objeto JSON válido.") from error
+    if not isinstance(parsed, dict):
+        raise ValueError("El valor debe ser un objeto JSON.")
+    return parsed
 
 
 def validator_schedule(value: object) -> dict[str, str]:

@@ -18,7 +18,7 @@ class HealthResponse(BaseModel):
         json_schema_extra={
             "example": {
                 "status": "healthy",
-                "app": "FarmaTupa_API",
+                "app": "AdamGroupSRL",
                 "version": "1.0.0",
                 "database": "connected",
             }

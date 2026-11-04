@@ -104,7 +104,7 @@ async def get_talla_audit(
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> TallaResponseAudit:
-    return await TallaService.get(db_session, talla_id)
+    return await TallaService.get(db_session, talla_id, include_deleted=True)
 
 
 @router.patch(

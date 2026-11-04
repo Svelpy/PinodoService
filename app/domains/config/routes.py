@@ -1,18 +1,23 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.domains.auth.dependencies import require_permission
 from app.domains.auth.schemas import CurrentUser
 from app.domains.config.schemas import (
+    HORARIO_DESCRIPTION,
+    REDES_SOCIALES_DESCRIPTION,
     ConfigResponse,
     ConfigResponseAudit,
     ConfigUpdate,
 )
 from app.domains.config.services import ConfigService
 from app.shared.enums import Action, Module
+from app.shared.errors.exceptions import body_validation_error
 from app.shared.schemas.errors import ErrorResponse
 
 
@@ -20,6 +25,7 @@ from app.shared.schemas.errors import ErrorResponse
 router = APIRouter(prefix="/config", tags=["Config"])
 
 ERROR_RESPONSES = {
+    400: {"model": ErrorResponse},
     401: {"model": ErrorResponse},
     403: {"model": ErrorResponse},
     404: {"model": ErrorResponse},
@@ -69,17 +75,81 @@ async def get_config_audit(
     response_model=ConfigResponse,
     summary="Actualizar configuración de la tienda",
     description=(
-        "horario y redes_sociales se reemplazan completos; envía {} para "
-        "vaciarlos. Los campos opcionales aceptan null para borrarlos."
+        "multipart/form-data. Solo se modifican los campos enviados. Un campo "
+        "de texto enviado vacío se borra (equivale a null); en nombre_tienda, "
+        "horario, redes_sociales y en_mantenimiento se rechaza. horario y "
+        "redes_sociales se envían como texto JSON y se reemplazan completos; "
+        "envía {} para vaciarlos. logo y favicon son archivos de imagen: se "
+        "suben a Cloudinary y reemplazan al anterior. No se admiten SVG ni "
+        "archivos de más de 5 MB. Para quitarlos, envía eliminar_logo o "
+        "eliminar_favicon en true."
     ),
-    responses=_error_responses(401, 403, 404, 422, 500),
+    responses=_error_responses(400, 401, 403, 404, 422, 500),
 )
 async def update_config(
-    data: ConfigUpdate,
+    request: Request,
     current_user: Annotated[
         CurrentUser,
         Depends(require_permission(Module.CONFIG, Action.UPDATE)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    nombre_tienda: Annotated[str | None, Form()] = None,
+    descripcion: Annotated[str | None, Form()] = None,
+    email_contacto: Annotated[str | None, Form()] = None,
+    telefono: Annotated[str | None, Form()] = None,
+    whatsapp: Annotated[str | None, Form()] = None,
+    direccion: Annotated[str | None, Form()] = None,
+    map_url: Annotated[str | None, Form()] = None,
+    ciudad: Annotated[str | None, Form()] = None,
+    horario: Annotated[
+        str | None,
+        Form(description=f"Texto JSON. {HORARIO_DESCRIPTION}"),
+    ] = None,
+    redes_sociales: Annotated[
+        str | None,
+        Form(description=f"Texto JSON. {REDES_SOCIALES_DESCRIPTION}"),
+    ] = None,
+    en_mantenimiento: Annotated[bool | None, Form()] = None,
+    logo: Annotated[UploadFile | None, File(description="Imagen del logo.")] = None,
+    favicon: Annotated[UploadFile | None, File(description="Imagen del favicon.")] = None,
+    eliminar_logo: Annotated[bool, Form(description="true quita el logo actual.")] = False,
+    eliminar_favicon: Annotated[bool, Form(description="true quita el favicon actual.")] = False,
 ) -> ConfigResponse:
-    return await ConfigService.update(db_session, data, current_user.id)
+    form_fields = {
+        "nombre_tienda": nombre_tienda,
+        "descripcion": descripcion,
+        "email_contacto": email_contacto,
+        "telefono": telefono,
+        "whatsapp": whatsapp,
+        "direccion": direccion,
+        "map_url": map_url,
+        "ciudad": ciudad,
+        "horario": horario,
+        "redes_sociales": redes_sociales,
+        "en_mantenimiento": en_mantenimiento,
+    }
+    # FastAPI entrega None tanto si el campo se omitió como si llegó vacío. Se
+    # consulta el formulario para distinguirlos: un campo omitido no se envía
+    # al schema y uno vacío llega como null, porque multipart no puede
+    # expresar null.
+    sent_names = (await request.form()).keys()
+    sent_fields = {
+        name: value for name, value in form_fields.items() if name in sent_names
+    }
+    try:
+        data = ConfigUpdate.model_validate(sent_fields)
+    except ValidationError as error:
+        raise body_validation_error(error) from error
+
+    return await ConfigService.update(
+        db_session,
+        data,
+        current_user.id,
+        settings,
+        # Un selector de archivo vacío llega como un archivo sin nombre.
+        logo=logo if logo is not None and logo.filename else None,
+        favicon=favicon if favicon is not None and favicon.filename else None,
+        eliminar_logo=eliminar_logo,
+        eliminar_favicon=eliminar_favicon,
+    )

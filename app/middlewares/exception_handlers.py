@@ -23,6 +23,9 @@ def _translate_validation_message(error: dict[str, Any]) -> str:
         original_error = context.get("error")
         if original_error is not None:
             return str(original_error)
+        # EmailStr informa el motivo en "reason" con un mensaje en inglés.
+        if "reason" in context:
+            return "El email no tiene un formato válido."
         return str(error.get("msg", "")).removeprefix("Value error, ")
 
     translations = {
@@ -40,6 +43,23 @@ def _translate_validation_message(error: dict[str, Any]) -> str:
         "string_too_short": (f"El texto debe contener al menos {context.get('min_length')} caracteres."        ),
         "string_too_long": (f"El texto no debe superar {context.get('max_length')} caracteres."        ),
         "decimal_max_places": (f"El importe no debe tener más de {context.get('decimal_places')} decimales."),
+        "extra_forbidden": "Campo no permitido.",
+        "int_type": "El valor debe ser un número entero válido.",
+        "bool_parsing": "El valor debe ser verdadero o falso.",
+        "bool_type": "El valor debe ser verdadero o falso.",
+        "enum": f"El valor debe ser uno de: {context.get('expected')}.",
+        "literal_error": f"El valor debe ser uno de: {context.get('expected')}.",
+        "dict_type": "El valor debe ser un objeto.",
+        "list_type": "El valor debe ser una lista.",
+        "model_type": "El valor debe ser un objeto.",
+        "model_attributes_type": "El valor debe ser un objeto.",
+        "too_short": f"La lista debe contener al menos {context.get('min_length')} elementos.",
+        "too_long": f"La lista no debe superar {context.get('max_length')} elementos.",
+        "date_parsing": "El valor debe ser una fecha válida con formato AAAA-MM-DD.",
+        "date_from_datetime_parsing": "El valor debe ser una fecha válida con formato AAAA-MM-DD.",
+        "datetime_parsing": "El valor debe ser una fecha y hora válida en formato ISO 8601.",
+        "datetime_from_date_parsing": "El valor debe ser una fecha y hora válida en formato ISO 8601.",
+        "json_invalid": "El cuerpo de la solicitud no es un JSON válido.",
     }
 
     return translations.get(error_type, str(error.get("msg", "")))

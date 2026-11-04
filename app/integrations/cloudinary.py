@@ -1,4 +1,5 @@
 import asyncio
+import re
 
 import cloudinary
 import cloudinary.uploader
@@ -11,6 +12,11 @@ from app.shared.errors.codes import ErrorCode
 
 logger = get_logger(__name__)
 MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5 MB
+
+# Subidas previas a crear su registro: viven en esta subcarpeta y con esta
+# etiqueta hasta que un create las asocia, lo que permite limpiar las huérfanas.
+PENDING_FOLDER = "pendientes"
+PENDING_TAG = "pendiente"
 
 def configure_cloudinary(settings: Settings) -> None:
     cloudinary.config(
@@ -45,10 +51,38 @@ class CloudinaryService:
             raise AppException("No se pudo extraer el identificador de la imagen", 400)
     
     @staticmethod
+    def is_pending_upload_url(url: str, settings: Settings) -> bool:
+        """
+        True si la URL es exactamente una de las que devuelve upload_pending:
+        HTTPS, de la cuenta configurada (cloud_name), dentro de la carpeta de
+        pendientes del proyecto y sin transformaciones ni parámetros añadidos.
+        """
+        if not isinstance(url, str) or not settings.CLOUDINARY_CLOUD_NAME:
+            return False
+        pattern = (
+            rf"https://res\.cloudinary\.com/{re.escape(settings.CLOUDINARY_CLOUD_NAME)}"
+            rf"/image/upload/v\d+/{re.escape(settings.CLOUDINARY_FOLDER_NAME or '')}"
+            rf"/{PENDING_FOLDER}/[A-Za-z0-9_-]+\.[A-Za-z0-9]+"
+        )
+        return re.fullmatch(pattern, url) is not None
+
+    @staticmethod
+    async def upload_pending(file: UploadFile, settings: Settings) -> dict[str, str]:
+        """Sube una imagen que todavía no pertenece a ningún registro."""
+        return await CloudinaryService.upload_image(
+            file,
+            PENDING_FOLDER,
+            settings,
+            tags=[PENDING_TAG],
+        )
+
+    @staticmethod
     async def upload_image(
         file: UploadFile,
         folder: str,
         settings: Settings,
+        *,
+        tags: list[str] | None = None,
     ) -> dict[str, str]:
         """
         Sube una imagen a Cloudinary.
@@ -76,7 +110,8 @@ class CloudinaryService:
                 cloudinary.uploader.upload,
                 content, 
                 folder=cloudinary_folder,
-                resource_type="image"
+                resource_type="image",
+                tags=tags or [],
             )
 
             secure_url = response.get("secure_url")
@@ -92,8 +127,10 @@ class CloudinaryService:
     async def delete_image(image_url: str) -> bool:
         """
         Elimina una imagen de Cloudinary utilizando su public_id.
+
+        Las URLs que no son de Cloudinary se ignoran: no hay nada que borrar.
         """
-        if not image_url:
+        if not image_url or "res.cloudinary.com" not in image_url:
             return False
         public_id = CloudinaryService._extract_public_id(image_url)
         if not public_id:
@@ -105,6 +142,22 @@ class CloudinaryService:
             resource_type="image",
         )
         return response.get("result") == "ok"
+
+    @staticmethod
+    async def confirm_pending_uploads(image_urls: list[str]) -> None:
+        """
+        Quita la etiqueta de pendiente a imágenes que ya quedaron asociadas a un
+        registro, para que la limpieza de huérfanas no las elimine.
+
+        No interrumpe la operación principal: si falla, solo se registra.
+        """
+        if not image_urls:
+            return
+        try:
+            public_ids = [CloudinaryService._extract_public_id(url) for url in image_urls]
+            await asyncio.to_thread(cloudinary.uploader.remove_tag, PENDING_TAG, public_ids)
+        except Exception:
+            logger.exception("No se pudo confirmar imágenes pendientes en Cloudinary: %s", image_urls)
 
     @staticmethod
     async def safe_delete_image(image_url: str) -> bool:

@@ -1,6 +1,6 @@
 from collections.abc import AsyncGenerator, Iterator
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -30,9 +30,17 @@ def _producto() -> Producto:
 
 SECCION = Seccion(nombre="Hombre", slug="hombre")
 
+RESUMEN = {
+    "portada_url": "https://res.cloudinary.com/demo/image/upload/a.jpg",
+    "precio_desde": 19.95,
+    "precio_hasta": 29.95,
+    "stock_total": 42,
+    "colores": [{"nombre": "Azul", "codigo_hex": "#1E3A8A"}],
+}
+
 
 def _list_item() -> SimpleNamespace:
-    return SimpleNamespace(**_producto().model_dump(), seccion=SECCION)
+    return SimpleNamespace(**_producto().model_dump(), seccion=SECCION, resumen=RESUMEN)
 
 
 def _detail() -> SimpleNamespace:
@@ -87,9 +95,11 @@ def test_list_pasa_filtros_y_embebe_la_seccion(
     assert response.json()["data"][0]["nombre"] == "Camisa Oxford"
     item = response.json()["data"][0]
     assert item["seccion"]["slug"] == "hombre"
+    assert item["resumen"]["colores"][0]["codigo_hex"] == "#1E3A8A"
     assert "categorias" not in item and "colores" not in item
     service.assert_awaited_once_with(
         db_session,
+        ANY,
         page=1,
         per_page=20,
         seccion_id=seccion_id,
@@ -104,7 +114,7 @@ def test_create_pasa_el_actor_al_service(
 ) -> None:
     client, current_user, db_session = route_context
 
-    with patch.object(ProductoService, "create", new=AsyncMock(return_value=_producto())) as service:
+    with patch.object(ProductoService, "create", new=AsyncMock(return_value=_detail())) as service:
         response = client.post(
             "/productos/",
             json={"seccion_id": str(uuid4()), "nombre": "Camisa Oxford"},
@@ -112,7 +122,11 @@ def test_create_pasa_el_actor_al_service(
 
     assert response.status_code == 201
     assert service.await_args.args[0] is db_session
+    assert service.await_args.args[1].colores == []
     assert service.await_args.args[2] == current_user.id
+    # Responde la ficha completa, igual que GET /productos/{id}.
+    assert response.json()["colores"][0]["color"]["nombre"] == "Azul"
+    assert response.json()["categorias"][0]["slug"] == "camisas"
 
 
 def test_create_rechaza_slug_y_campos_desconocidos(
@@ -134,7 +148,7 @@ def test_get_devuelve_detail_con_seccion_categorias_y_colores(
     client, _, db_session = route_context
     detail = _detail()
 
-    with patch.object(ProductoService, "get", new=AsyncMock(return_value=detail)) as service:
+    with patch.object(ProductoService, "get_detail", new=AsyncMock(return_value=detail)) as service:
         response = client.get(f"/productos/{detail.id}")
 
     body = response.json()
@@ -144,7 +158,8 @@ def test_get_devuelve_detail_con_seccion_categorias_y_colores(
     assert body["colores"][0]["color"]["nombre"] == "Azul"
     assert body["colores"][0]["imagenes"] == [] and body["colores"][0]["skus"] == []
     assert "is_deleted" not in body
-    service.assert_awaited_once_with(db_session, detail.id, load_detail=True)
+    assert body["resumen"]["precio_desde"] == 19.95
+    service.assert_awaited_once_with(db_session, detail.id, ANY)
 
 
 def test_audit_reutiliza_get_sin_cargar_el_detail(
@@ -158,7 +173,7 @@ def test_audit_reutiliza_get_sin_cargar_el_detail(
 
     assert audit.json()["is_deleted"] is False
     assert "seccion" not in audit.json()
-    service.assert_awaited_once_with(db_session, producto.id)
+    service.assert_awaited_once_with(db_session, producto.id, include_deleted=True)
 
 
 def test_delete_responde_204(

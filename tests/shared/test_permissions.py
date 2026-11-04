@@ -32,6 +32,13 @@ def test_cada_rol_lista_todos_los_modulos() -> None:
         (Role.OWNER, Role.SUPERADMIN, False),
         (Role.ADMIN, Role.OWNER, False),
         (Role.ADMIN, Role.SUPERADMIN, False),
+        (Role.SUPERADMIN, Role.CAJERO, True),
+        (Role.OWNER, Role.CAJERO, True),
+        (Role.ADMIN, Role.CAJERO, True),
+        (Role.CAJERO, Role.CAJERO, False),
+        (Role.CAJERO, Role.ADMIN, False),
+        (Role.CAJERO, Role.OWNER, False),
+        (Role.CAJERO, Role.SUPERADMIN, False),
     ],
 )
 def test_can_manage_role_solo_roles_estrictamente_inferiores(
@@ -40,6 +47,14 @@ def test_can_manage_role_solo_roles_estrictamente_inferiores(
     expected: bool,
 ) -> None:
     assert can_manage_role(actor_role, target_role) is expected
+
+
+def test_cajero_solo_lee_y_no_gestiona_usuarios() -> None:
+    cajero = ROLE_PERMISSIONS[Role.CAJERO]
+    assert cajero[Module.USUARIO] == frozenset()
+    for module, actions in cajero.items():
+        if module is not Module.USUARIO:
+            assert actions == frozenset({Action.READ}), module
 
 
 def test_las_rutas_de_auditoria_exigen_la_accion_audit() -> None:

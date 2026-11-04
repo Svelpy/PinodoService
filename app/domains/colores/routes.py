@@ -107,7 +107,7 @@ async def get_color_audit(
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ColorResponseAudit:
-    return await ColorService.get(db_session, color_id)
+    return await ColorService.get(db_session, color_id, include_deleted=True)
 
 
 @router.patch(

@@ -4,7 +4,8 @@ class Role(str, Enum):
     SUPERADMIN = "SUPERADMIN"
     OWNER = "OWNER"
     ADMIN = "ADMIN"
-    
+    CAJERO = "CAJERO"
+
 
 
 class Module(str, Enum):

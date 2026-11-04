@@ -1,5 +1,8 @@
 from typing import Any
 
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
+
 class AppException(Exception):
     """
     Excepción personalizada para errores operacionales esperados.
@@ -22,3 +25,25 @@ class AppException(Exception):
         self.code = code or "APP_ERROR"
         self.details = details or {}
         self.is_operational = True
+
+
+def body_validation_error(
+    error: ValidationError,
+    renamed_fields: dict[str, str] | None = None,
+) -> RequestValidationError:
+    """
+    Convierte la validación manual de un schema (por ejemplo, de un formulario)
+    en el mismo 422 traducido que produce FastAPI con el body.
+
+    renamed_fields permite informar un campo con el nombre que usa el cliente.
+    """
+    renamed_fields = renamed_fields or {}
+    return RequestValidationError(
+        [
+            {
+                **item,
+                "loc": ("body", *(renamed_fields.get(str(part), part) for part in item["loc"])),
+            }
+            for item in error.errors()
+        ]
+    )

@@ -1,12 +1,16 @@
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import Select, and_, func, not_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.domains.colores.models import Color
+from app.domains.producto_colores.models import ProductoColor
+from app.domains.productos.models import Producto
 from app.domains.skus.models import SKU_TALLA_ORDER, Sku
+from app.domains.tallas.models import Talla
 
 
 class SkuRepository:
@@ -139,6 +143,96 @@ class SkuRepository:
             .limit(limit)
         )
         return list(result.scalars().all()), total
+
+    async def list_inventario(
+        self,
+        *,
+        offset: int,
+        limit: int,
+        today: date,
+        codigo_barras: str | None = None,
+        nombre: str | None = None,
+        producto_id: UUID | None = None,
+        color_id: UUID | None = None,
+        talla_id: UUID | None = None,
+        is_visible: bool | None = None,
+        bajo_minimo: bool | None = None,
+        sin_codigo_barras: bool | None = None,
+        en_rebaja: bool | None = None,
+    ) -> tuple[list[tuple[Sku, UUID, str, UUID, str, str, str]], int]:
+        """
+        SKUs activos de colores y productos activos, con el producto, el color y
+        la talla de cada uno. Ordenados por producto, color y orden de talla.
+
+        codigo_barras busca la coincidencia exacta; nombre, coincidencias
+        parciales en el nombre del producto sin distinguir mayúsculas.
+        en_rebaja usa today para decidir si la rebaja sigue vigente.
+        """
+        filters = [
+            Sku.is_deleted.is_(False),
+            ProductoColor.is_deleted.is_(False),
+            Producto.is_deleted.is_(False),
+        ]
+        if codigo_barras is not None:
+            filters.append(Sku.codigo_barras == codigo_barras)
+        if nombre:
+            filters.append(Producto.nombre.icontains(nombre, autoescape=True))
+        if producto_id is not None:
+            filters.append(Producto.id == producto_id)
+        if color_id is not None:
+            filters.append(Color.id == color_id)
+        if talla_id is not None:
+            filters.append(Sku.talla_id == talla_id)
+        if is_visible is not None:
+            filters.append(Sku.is_visible.is_(is_visible))
+        if bajo_minimo is not None:
+            cantidad = Sku.stock["cantidad"].as_integer()
+            minimo = Sku.stock["minimo"].as_integer()
+            filters.append(cantidad <= minimo if bajo_minimo else cantidad > minimo)
+        if sin_codigo_barras is not None:
+            filters.append(
+                Sku.codigo_barras.is_(None) if sin_codigo_barras else Sku.codigo_barras.is_not(None)
+            )
+        if en_rebaja is not None:
+            # JSONB guarda rebaja_hasta como texto ISO, que se ordena como fecha.
+            rebaja_hasta = Sku.precio["rebaja_hasta"].astext
+            vigente = and_(
+                Sku.precio["rebajado"].astext.is_not(None),
+                or_(rebaja_hasta.is_(None), rebaja_hasta >= today.isoformat()),
+            )
+            filters.append(vigente if en_rebaja else not_(vigente))
+
+        def joined(statement: Select) -> Select:
+            return (
+                statement.join(ProductoColor, Sku.producto_color_id == ProductoColor.id)
+                .join(Producto, ProductoColor.producto_id == Producto.id)
+                .join(Color, ProductoColor.color_id == Color.id)
+                .join(Talla, Sku.talla_id == Talla.id)
+                .where(*filters)
+            )
+
+        total_result = await self.db_session.execute(
+            joined(select(func.count()).select_from(Sku))
+        )
+        total = int(total_result.scalar_one())
+
+        result = await self.db_session.execute(
+            joined(
+                select(
+                    Sku,
+                    Producto.id,
+                    Producto.nombre,
+                    Color.id,
+                    Color.nombre,
+                    Color.codigo_hex,
+                    Talla.etiqueta,
+                )
+            )
+            .order_by(Producto.nombre, Producto.id, Color.nombre, Talla.created_at, Sku.id)
+            .offset(offset)
+            .limit(limit)
+        )
+        return [tuple(row) for row in result.all()], total
 
     def add(self, sku: Sku) -> None:
         self.db_session.add(sku)

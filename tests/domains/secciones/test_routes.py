@@ -96,6 +96,24 @@ def test_audit_expone_campos_de_auditoria(
     assert audit.json()["is_deleted"] is False
 
 
+def test_audit_incluye_eliminados_y_get_no(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, _, db_session = route_context
+    seccion = _seccion()
+    seccion.is_deleted = True
+
+    with patch.object(SeccionService, "get", new=AsyncMock(return_value=seccion)) as service:
+        client.get(f"/secciones/{seccion.id}")
+        audit = client.get(f"/secciones/{seccion.id}/audit")
+
+    assert audit.status_code == 200
+    assert audit.json()["is_deleted"] is True
+    assert service.await_args_list[0].args == (db_session, seccion.id)
+    assert service.await_args_list[0].kwargs == {}
+    assert service.await_args_list[1].kwargs == {"include_deleted": True}
+
+
 def test_delete_responde_204(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:

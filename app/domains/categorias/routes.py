@@ -142,7 +142,7 @@ async def get_categoria_audit(
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> CategoriaResponseAudit:
-    return await CategoriaService.get(db_session, categoria_id)
+    return await CategoriaService.get(db_session, categoria_id, include_deleted=True)
 
 
 @router.patch(

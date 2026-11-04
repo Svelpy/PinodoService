@@ -116,7 +116,7 @@ def test_audit_reutiliza_get_sin_cargar_el_detail(
 
     assert response.status_code == 200
     assert response.json()["is_deleted"] is False
-    service.assert_awaited_once_with(db_session, categoria.id)
+    service.assert_awaited_once_with(db_session, categoria.id, include_deleted=True)
 
 
 def test_create_rechaza_slug_enviado_por_el_cliente(

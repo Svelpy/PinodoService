@@ -271,3 +271,114 @@ async def test_get_inexistente_responde_404() -> None:
             await SkuService.get(_session(), uuid4())
 
     assert error.value.status_code == 404
+
+
+# --- PATCH parcial dentro de precio y stock ---------------------------------
+
+def _sku_rebajado() -> Sku:
+    return _sku(
+        precio={"normal": 29.95, "rebajado": 19.95, "rebaja_hasta": "2026-12-31"},
+        stock={"cantidad": 5, "minimo": 3, "actualizado": None},
+    )
+
+
+async def _update(sku: Sku, body: dict[str, object]) -> Sku:
+    with patch.object(SkuService, "get", new=AsyncMock(return_value=sku)):
+        return await SkuService.update(_session(), sku.id, SkuUpdate.model_validate(body), uuid4())
+
+
+@pytest.mark.asyncio
+async def test_update_solo_cantidad_conserva_el_minimo() -> None:
+    result = await _update(_sku_rebajado(), {"stock": {"cantidad": 9}})
+
+    assert (result.stock["cantidad"], result.stock["minimo"]) == (9, 3)
+    assert result.stock["actualizado"] is not None
+
+
+@pytest.mark.asyncio
+async def test_update_solo_normal_conserva_la_rebaja() -> None:
+    result = await _update(_sku_rebajado(), {"precio": {"normal": 35}})
+
+    assert result.precio == {"normal": 35.0, "rebajado": 19.95, "rebaja_hasta": "2026-12-31"}
+
+
+@pytest.mark.asyncio
+async def test_update_rebajado_null_quita_la_rebaja_y_su_fecha() -> None:
+    result = await _update(_sku_rebajado(), {"precio": {"rebajado": None}})
+
+    assert result.precio == {"normal": 29.95, "rebajado": None, "rebaja_hasta": None}
+
+
+@pytest.mark.asyncio
+async def test_update_valida_el_precio_resultante() -> None:
+    session = _session()
+    sku = _sku_rebajado()
+
+    with patch.object(SkuService, "get", new=AsyncMock(return_value=sku)):
+        with pytest.raises(AppException) as error:
+            # 15 deja al normal por debajo del rebajado guardado (19.95).
+            await SkuService.update(
+                session, sku.id, SkuUpdate.model_validate({"precio": {"normal": 15}}), uuid4()
+            )
+
+    assert error.value.status_code == 422
+    assert error.value.details == {
+        "precio": "El precio rebajado debe ser menor que el precio normal."
+    }
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_rechaza_rebaja_hasta_sin_rebaja() -> None:
+    with pytest.raises(AppException) as error:
+        await _update(_sku(), {"precio": {"rebaja_hasta": "2026-12-31"}})
+
+    assert "precio" in error.value.details
+
+
+# --- Inventario ---------------------------------------------------------------
+
+from datetime import date  # noqa: E402
+from decimal import Decimal  # noqa: E402
+
+from app.domains.skus.schemas import SkuPrecio  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    ("precio", "esperado"),
+    [
+        ({"normal": 30}, Decimal("30")),
+        ({"normal": 30, "rebajado": 20}, Decimal("20")),
+        ({"normal": 30, "rebajado": 20, "rebaja_hasta": "2026-11-04"}, Decimal("20")),  # vence hoy
+        ({"normal": 30, "rebajado": 20, "rebaja_hasta": "2026-11-03"}, Decimal("30")),  # venció ayer
+    ],
+)
+def test_precio_vigente(precio: dict[str, object], esperado: Decimal) -> None:
+    assert SkuService.precio_vigente(SkuPrecio.model_validate(precio), date(2026, 11, 4)) == esperado
+
+
+def test_local_today_aplica_el_desfase_de_la_tienda() -> None:
+    from datetime import datetime, timezone
+
+    settings = MagicMock(TIMEZONE_OFFSET_HOURS=-4)
+    # 02:00 UTC del 5 de noviembre son las 22:00 del 4 en la tienda.
+    with patch(
+        "app.domains.skus.services.utc_now",
+        return_value=datetime(2026, 11, 5, 2, 0, tzinfo=timezone.utc),
+    ):
+        assert SkuService.local_today(settings) == date(2026, 11, 4)
+
+
+@pytest.mark.asyncio
+async def test_inventario_normaliza_el_codigo_y_rechaza_uno_invalido() -> None:
+    settings = MagicMock(TIMEZONE_OFFSET_HOURS=-4)
+    repo = AsyncMock(return_value=([], 0))
+
+    with patch.object(SkuRepository, "list_inventario", new=repo):
+        await SkuService.list_inventario(_session(), settings, codigo_barras="  841-23  ")
+        with pytest.raises(AppException) as error:
+            await SkuService.list_inventario(_session(), settings, codigo_barras="84 1")
+
+    assert repo.await_args_list[0].kwargs["codigo_barras"] == "841-23"
+    assert error.value.status_code == 422
+    assert "codigo_barras" in error.value.details

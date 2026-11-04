@@ -119,3 +119,26 @@ def test_sku_list_item_embebe_talla_y_deja_dueno_como_id() -> None:
 
 def test_sku_detail_no_anade_campos() -> None:
     assert SkuDetail.model_fields.keys() == SkuListItem.model_fields.keys()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"stock": {"cantidad": None}},
+        {"stock": {"cantidad": -1}},
+        {"stock": {"actualizado": "2026-01-01T00:00:00Z"}},
+        {"precio": {"normal": None}},
+        {"precio": {"normal": 0}},
+        {"precio": {"normal": 1.999}},
+    ],
+)
+def test_sku_update_parcial_rechaza_valores_invalidos(body: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        SkuUpdate.model_validate(body)
+
+
+def test_sku_update_parcial_conserva_solo_lo_enviado() -> None:
+    data = SkuUpdate.model_validate({"stock": {"minimo": 4}, "precio": {"rebajado": None}})
+
+    assert data.stock.model_dump(exclude_unset=True) == {"minimo": 4}
+    assert data.precio.model_dump(exclude_unset=True) == {"rebajado": None}

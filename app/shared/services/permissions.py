@@ -43,7 +43,7 @@ ROLE_PERMISSIONS: dict[Role, dict[Module, frozenset[Action]]] = {
     },
     # Encargado que administra la tienda por el dueño.
     Role.ADMIN: {
-        Module.USUARIO: frozenset(),  # no tiene roles inferiores que gestionar
+        Module.USUARIO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),  # la jerarquía lo limita a gestionar cajeros
         Module.CONFIG: frozenset({Action.READ}),  # la identidad de la tienda la decide el dueño
         Module.SECCION: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.AUDIT}),  # estructura de la tienda: oculta con is_visible
         Module.CATEGORIA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
@@ -55,15 +55,30 @@ ROLE_PERMISSIONS: dict[Role, dict[Module, frozenset[Action]]] = {
         Module.TALLA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.SKU: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
     },
+    # Atiende la caja: consulta el catálogo, precios y stock sin modificarlos.
+    Role.CAJERO: {
+        Module.USUARIO: frozenset(),  # no gestiona usuarios; su perfil lo edita desde /me
+        Module.CONFIG: frozenset({Action.READ}),  # solo consulta los datos de la tienda
+        Module.SECCION: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
+        Module.CATEGORIA: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
+        Module.PRODUCTO: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
+        Module.CATEGORIA_PRODUCTO: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
+        Module.COLOR: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
+        Module.PRODUCTO_COLOR: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
+        Module.IMAGEN: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
+        Module.TALLA: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
+        Module.SKU: frozenset({Action.READ}),  # consulta precios y stock; no los ajusta
+    },
 }
 
 
 # Jerarquía de roles: un número mayor es un rango superior.
 # Todo rol de Role debe figurar aquí.
 ROLE_LEVEL: dict[Role, int] = {
-    Role.ADMIN: 1,
-    Role.OWNER: 2,
-    Role.SUPERADMIN: 3,
+    Role.CAJERO: 1,
+    Role.ADMIN: 2,
+    Role.OWNER: 3,
+    Role.SUPERADMIN: 4,
 }
 
 

@@ -9,12 +9,14 @@ from app.core.database import get_db
 from app.domains.auth.dependencies import require_permission
 from app.domains.auth.schemas import CurrentUser
 from app.domains.imagenes.schemas import (
+    ImagenBibliotecaItem,
     ImagenCreate,
     ImagenDetail,
     ImagenListItem,
     ImagenResponse,
     ImagenResponseAudit,
     ImagenUpdate,
+    ImagenUploadResponse,
 )
 from app.domains.imagenes.services import ImagenService
 from app.shared.enums import Action, Module, TipoImagen
@@ -69,6 +71,43 @@ async def list_imagenes(
     )
 
 
+@router.get(
+    "/biblioteca",
+    response_model=PaginatedResponse[ImagenBibliotecaItem],
+    summary="Biblioteca de imágenes",
+    description=(
+        "Todas las imágenes activas con el producto y el color a los que "
+        "pertenecen, de la más reciente a la más antigua. nombre busca "
+        "coincidencias parciales en el nombre del producto. Las subidas "
+        "pendientes de POST /imagenes/uploads no aparecen hasta que se asocian "
+        "a un color."
+    ),
+    responses=_error_responses(401, 403, 422, 500),
+)
+async def list_biblioteca(
+    current_user: Annotated[
+        CurrentUser,
+        Depends(require_permission(Module.IMAGEN, Action.READ)),
+    ],
+    db_session: Annotated[AsyncSession, Depends(get_db)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    per_page: Annotated[int, Query(ge=1, le=100)] = 20,
+    producto_id: Annotated[UUID | None, Query()] = None,
+    color_id: Annotated[UUID | None, Query()] = None,
+    tipo: Annotated[TipoImagen | None, Query()] = None,
+    nombre: Annotated[str | None, Query(max_length=200)] = None,
+) -> PaginatedResponse[ImagenBibliotecaItem]:
+    return await ImagenService.list_biblioteca(
+        db_session,
+        page=page,
+        per_page=per_page,
+        producto_id=producto_id,
+        color_id=color_id,
+        tipo=tipo,
+        nombre=nombre,
+    )
+
+
 @router.post(
     "/",
     response_model=ImagenResponse,
@@ -99,6 +138,31 @@ async def create_imagen(
         current_user.id,
         settings,
     )
+
+
+@router.post(
+    "/uploads",
+    response_model=ImagenUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Subir imagen antes de crear el producto",
+    description=(
+        "multipart/form-data con el archivo. Lo sube a Cloudinary y devuelve su "
+        "URL sin crear ningún registro, para usarla después en el create del "
+        "producto dentro del color correspondiente. Las URLs que no se usen se "
+        "consideran huérfanas. No se admiten SVG ni archivos de más de 5 MB."
+    ),
+    responses=_error_responses(400, 401, 403, 422, 500),
+)
+async def upload_imagen_pendiente(
+    file: Annotated[UploadFile, File(description="Archivo de imagen.")],
+    current_user: Annotated[
+        CurrentUser,
+        Depends(require_permission(Module.IMAGEN, Action.CREATE)),
+    ],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ImagenUploadResponse:
+    url = await ImagenService.upload_pending(file, settings, current_user.id)
+    return ImagenUploadResponse(url=url)
 
 
 @router.get(
@@ -132,7 +196,7 @@ async def get_imagen_audit(
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ImagenResponseAudit:
-    return await ImagenService.get(db_session, imagen_id)
+    return await ImagenService.get(db_session, imagen_id, include_deleted=True)
 
 
 @router.patch(

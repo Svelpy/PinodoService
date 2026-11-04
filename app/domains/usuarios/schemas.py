@@ -19,7 +19,7 @@ class UsuarioCreate(BaseModel):
     password: str = Field(..., min_length=6, max_length=20)
     nombre: str = Field(..., min_length=2, max_length=100)
     apellidos: str | None = Field(default=None, min_length=2, max_length=150)
-    telefono: str | None = Field(default=None, min_length=6, max_length=30)
+    telefono: str | None = Field(default=None, min_length=6, max_length=20)
     rol: Role = Field(...)
 
     @field_validator("email", mode="before")
@@ -85,7 +85,7 @@ class UsuarioUpdateMe(BaseModel):
     email: EmailStr | None = Field(default=None, max_length=255)
     nombre: str | None = Field(default=None, min_length=2, max_length=100)
     apellidos: str | None = Field(default=None, min_length=2, max_length=150)
-    telefono: str | None = Field(default=None, min_length=6, max_length=30)
+    telefono: str | None = Field(default=None, min_length=6, max_length=20)
 
     @field_validator("email", mode="before")
     @classmethod

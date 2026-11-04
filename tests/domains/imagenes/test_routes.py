@@ -13,6 +13,7 @@ from app.domains.auth.dependencies import get_current_principal
 from app.domains.auth.schemas import CurrentUser
 from app.domains.imagenes.models import Imagen
 from app.domains.imagenes.routes import router
+from app.domains.imagenes.schemas import ImagenBibliotecaItem, ImagenResponse
 from app.domains.imagenes.services import ImagenService
 from app.middlewares.exception_handlers import register_exception_handlers
 from app.shared.enums import Role, TipoImagen
@@ -166,3 +167,105 @@ def test_lecturas_declaran_list_item_y_detail(
     assert schema_ref("/imagenes/").endswith("PaginatedResponse_ImagenListItem_")
     assert schema_ref("/imagenes/{imagen_id}").endswith("/ImagenDetail")
     assert schema_ref("/imagenes/{imagen_id}/audit").endswith("/ImagenResponseAudit")
+
+
+PENDIENTE = "https://res.cloudinary.com/demo/image/upload/v1/pinodo/pendientes/foto.jpg"
+
+
+def test_upload_pendiente_devuelve_la_url_sin_crear_registro(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, current_user, db_session = route_context
+
+    with (
+        patch.object(ImagenService, "upload_pending", new=AsyncMock(return_value=PENDIENTE)) as upload,
+        patch.object(ImagenService, "create", new=AsyncMock()) as create,
+    ):
+        response = client.post(
+            "/imagenes/uploads",
+            files={"file": ("foto.jpg", b"jpg", "image/jpeg")},
+        )
+
+    assert response.status_code == 201
+    assert response.json() == {"url": PENDIENTE}
+    assert upload.await_args.args[2] == current_user.id
+    create.assert_not_awaited()
+    db_session.commit.assert_not_called()
+
+
+def test_upload_pendiente_exige_archivo(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, _, _ = route_context
+
+    response = client.post("/imagenes/uploads")
+
+    assert response.status_code == 422
+
+
+def test_upload_pendiente_cajero_responde_403(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, current_user, _ = route_context
+    current_user.rol = Role.CAJERO
+
+    with patch.object(ImagenService, "upload_pending", new=AsyncMock()) as upload:
+        response = client.post(
+            "/imagenes/uploads",
+            files={"file": ("foto.jpg", b"jpg", "image/jpeg")},
+        )
+
+    assert response.status_code == 403
+    upload.assert_not_awaited()
+
+
+def test_biblioteca_pasa_los_filtros_y_no_choca_con_get_por_id(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, _, db_session = route_context
+    item = ImagenBibliotecaItem(
+        **ImagenResponse.model_validate(_imagen()).model_dump(),
+        producto_id=uuid4(),
+        producto_nombre="Camisa Oxford",
+        color_id=uuid4(),
+        color_nombre="Azul",
+        color_codigo_hex="#1E3A8A",
+    )
+    page = PaginatedResponse(total=1, page=1, per_page=20, total_pages=1, data=[item])
+    producto_id = uuid4()
+
+    with (
+        patch.object(ImagenService, "list_biblioteca", new=AsyncMock(return_value=page)) as service,
+        patch.object(ImagenService, "get", new=AsyncMock()) as get,
+    ):
+        response = client.get(
+            "/imagenes/biblioteca",
+            params={"producto_id": str(producto_id), "tipo": "MODELO", "nombre": "camisa"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"][0]["producto_nombre"] == "Camisa Oxford"
+    assert response.json()["data"][0]["color_codigo_hex"] == "#1E3A8A"
+    service.assert_awaited_once_with(
+        db_session,
+        page=1,
+        per_page=20,
+        producto_id=producto_id,
+        color_id=None,
+        tipo=TipoImagen.MODELO,
+        nombre="camisa",
+    )
+    get.assert_not_awaited()
+
+
+def test_biblioteca_cajero_puede_leer(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, current_user, _ = route_context
+    current_user.rol = Role.CAJERO
+    page = PaginatedResponse(total=0, page=1, per_page=20, total_pages=0, data=[])
+
+    with patch.object(ImagenService, "list_biblioteca", new=AsyncMock(return_value=page)):
+        response = client.get("/imagenes/biblioteca")
+
+    assert response.status_code == 200

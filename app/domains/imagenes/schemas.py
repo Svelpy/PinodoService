@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.shared.enums import TipoImagen
+from app.shared.services.validators import validator_http_url
 
 
 class ImagenCreate(BaseModel):
@@ -29,6 +30,68 @@ class ImagenCreate(BaseModel):
             "example": {
                 "producto_color_id": "88888888-8888-4888-8888-888888888888",
                 "tipo": "MODELO",
+            }
+        },
+    )
+
+
+class ImagenDetailCreate(BaseModel):
+    """
+    Imagen dentro de ProductoColorDetailCreate (create en un solo paso).
+
+    No lleva producto_color_id: lo asigna el service al crear su color. La url
+    es la que devolvió POST /imagenes/uploads; el service comprueba que sea una
+    subida pendiente de la cuenta de Cloudinary del proyecto.
+    """
+
+    url: str = Field(..., min_length=1, max_length=500)
+    tipo: TipoImagen = Field(default=TipoImagen.MODELO)
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def validate_url(cls, value: object) -> str:
+        if value is None:
+            raise ValueError("La url de la imagen no puede ser null.")
+        return validator_http_url(value)
+
+    @field_validator("tipo")
+    @classmethod
+    def validate_tipo(cls, value: TipoImagen | None) -> TipoImagen:
+        if value is None:
+            raise ValueError("El tipo de imagen no puede ser null.")
+        return value
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "url": (
+                    "https://res.cloudinary.com/demo/image/upload/v1730700000/"
+                    "pinodo/pendientes/k3j9x2camisa.jpg"
+                ),
+                "tipo": "MODELO",
+            }
+        },
+    )
+
+
+class ImagenUploadResponse(BaseModel):
+    """
+    Imagen subida a Cloudinary que todavía no pertenece a ningún color.
+
+    La url se envía después en el create del producto, que es quien crea el
+    registro de la imagen.
+    """
+
+    url: str
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "url": (
+                    "https://res.cloudinary.com/demo/image/upload/v1730700000/"
+                    "pinodo/pendientes/k3j9x2camisa.jpg"
+                ),
             }
         },
     )
@@ -78,6 +141,36 @@ class ImagenResponse(BaseModel):
                 "tipo": "MODELO",
                 "created_at": "2026-10-29T14:30:00Z",
                 "updated_at": "2026-10-29T15:00:00Z",
+            }
+        },
+    )
+
+
+class ImagenBibliotecaItem(ImagenResponse):
+    """
+    Imagen con el producto y el color a los que pertenece, para la biblioteca.
+
+    Schema especial de lectura: a diferencia de ImagenListItem, muestra datos
+    del dueño. Son campos planos y no embebidos, porque imagenes no puede
+    importar los schemas de productos sin crear un ciclo de imports.
+    """
+
+    producto_id: UUID
+    producto_nombre: str
+    color_id: UUID
+    color_nombre: str
+    color_codigo_hex: str
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                **ImagenResponse.model_config["json_schema_extra"]["example"],
+                "producto_id": "55555555-5555-4555-8555-555555555555",
+                "producto_nombre": "Camisa Oxford",
+                "color_id": "77777777-7777-4777-8777-777777777777",
+                "color_nombre": "Azul marino",
+                "color_codigo_hex": "#1E3A8A",
             }
         },
     )

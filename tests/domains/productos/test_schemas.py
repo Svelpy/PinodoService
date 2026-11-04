@@ -56,6 +56,15 @@ def test_producto_response_desde_modelo() -> None:
     assert ProductoResponse.model_validate(producto).nombre == "Camisa Oxford"
 
 
+RESUMEN = {
+    "portada_url": None,
+    "precio_desde": None,
+    "precio_hasta": None,
+    "stock_total": 0,
+    "colores": [{"nombre": "Azul", "codigo_hex": "#1E3A8A"}],
+}
+
+
 def _producto_orm() -> SimpleNamespace:
     seccion = Seccion(nombre="Hombre", slug="hombre")
     producto = Producto(seccion_id=seccion.id, nombre="Camisa Oxford")
@@ -67,6 +76,7 @@ def _producto_orm() -> SimpleNamespace:
     return SimpleNamespace(
         **producto.model_dump(),
         seccion=seccion,
+        resumen=RESUMEN,
         categorias=[categoria],
         colores=[
             SimpleNamespace(

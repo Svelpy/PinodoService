@@ -8,10 +8,27 @@ from app.shared.services.validators import (
     validator_boolean,
     validator_email,
     validator_http_url,
+    validator_json_object,
     validator_non_empty_text,
     validator_phone,
     validator_schedule,
     validator_social_links,
+)
+
+HORARIO_DESCRIPTION = (
+    "Horario semanal como objeto día → horas. Claves válidas: lunes, martes, "
+    "miércoles, jueves, viernes, sábado y domingo; no distinguen mayúsculas ni "
+    "tildes y se guardan en su forma canónica (\"sabado\" → \"sábado\"). No se "
+    "admiten rangos como \"lunes_a_viernes\" ni días repetidos. Valor: "
+    "\"HH:MM-HH:MM\" en formato 24 h, con la apertura anterior al cierre. Un día "
+    "ausente se considera cerrado. {} indica que no hay horario."
+)
+
+REDES_SOCIALES_DESCRIPTION = (
+    "Redes sociales como objeto red → URL. Clave: entre 1 y 30 letras sin "
+    "tildes, dígitos, '_' o '-' (por ejemplo instagram, facebook, tiktok); se "
+    "guarda en minúsculas y no puede repetirse. Valor: URL absoluta http o "
+    "https. {} indica que no hay redes."
 )
 
 
@@ -23,13 +40,16 @@ class ConfigCreate(BaseModel):
     logo_url: str | None = Field(default=None, max_length=500)
     favicon_url: str | None = Field(default=None, max_length=500)
     email_contacto: EmailStr | None = Field(default=None, max_length=255)
-    telefono: str | None = Field(default=None, min_length=6, max_length=30)
-    whatsapp: str | None = Field(default=None, min_length=6, max_length=30)
+    telefono: str | None = Field(default=None, min_length=6, max_length=20)
+    whatsapp: str | None = Field(default=None, min_length=6, max_length=20)
     direccion: str | None = Field(default=None, min_length=1, max_length=255)
     map_url: str | None = Field(default=None, max_length=500)
     ciudad: str | None = Field(default=None, min_length=1, max_length=100)
-    horario: dict[str, str] = Field(default_factory=dict)
-    redes_sociales: dict[str, str] = Field(default_factory=dict)
+    horario: dict[str, str] = Field(default_factory=dict, description=HORARIO_DESCRIPTION)
+    redes_sociales: dict[str, str] = Field(
+        default_factory=dict,
+        description=REDES_SOCIALES_DESCRIPTION,
+    )
     en_mantenimiento: bool = Field(default=False)
 
     @field_validator("nombre_tienda", mode="before")
@@ -118,18 +138,24 @@ class ConfigCreate(BaseModel):
 
 
 class ConfigUpdate(BaseModel):
+    """
+    Campos de texto del PATCH. El logo y el favicon no forman parte del schema:
+    llegan como archivos y el service guarda la URL que devuelve Cloudinary.
+    """
+
     nombre_tienda: str | None = Field(default=None, min_length=1, max_length=150)
     descripcion: str | None = Field(default=None, min_length=1)
-    logo_url: str | None = Field(default=None, max_length=500)
-    favicon_url: str | None = Field(default=None, max_length=500)
     email_contacto: EmailStr | None = Field(default=None, max_length=255)
-    telefono: str | None = Field(default=None, min_length=6, max_length=30)
-    whatsapp: str | None = Field(default=None, min_length=6, max_length=30)
+    telefono: str | None = Field(default=None, min_length=6, max_length=20)
+    whatsapp: str | None = Field(default=None, min_length=6, max_length=20)
     direccion: str | None = Field(default=None, min_length=1, max_length=255)
     map_url: str | None = Field(default=None, max_length=500)
     ciudad: str | None = Field(default=None, min_length=1, max_length=100)
-    horario: dict[str, str] | None = Field(default=None)
-    redes_sociales: dict[str, str] | None = Field(default=None)
+    horario: dict[str, str] | None = Field(default=None, description=HORARIO_DESCRIPTION)
+    redes_sociales: dict[str, str] | None = Field(
+        default=None,
+        description=REDES_SOCIALES_DESCRIPTION,
+    )
     en_mantenimiento: bool | None = Field(default=None)
 
     @field_validator("nombre_tienda", mode="before")
@@ -146,7 +172,7 @@ class ConfigUpdate(BaseModel):
             return None
         return validator_non_empty_text(value)
 
-    @field_validator("logo_url", "favicon_url", "map_url", mode="before")
+    @field_validator("map_url", mode="before")
     @classmethod
     def validate_optional_url(cls, value: object) -> str | None:
         if value is None:
@@ -178,15 +204,15 @@ class ConfigUpdate(BaseModel):
     @classmethod
     def validate_horario(cls, value: object) -> dict[str, str]:
         if value is None:
-            raise ValueError("El horario no puede ser null; usa {} para borrarlo.")
-        return validator_schedule(value)
+            raise ValueError("El horario no puede quedar vacío; usa {} para borrarlo.")
+        return validator_schedule(validator_json_object(value))
 
     @field_validator("redes_sociales", mode="before")
     @classmethod
     def validate_redes_sociales(cls, value: object) -> dict[str, str]:
         if value is None:
-            raise ValueError("Las redes sociales no pueden ser null; usa {} para borrarlas.")
-        return validator_social_links(value)
+            raise ValueError("Las redes sociales no pueden quedar vacías; usa {} para borrarlas.")
+        return validator_social_links(validator_json_object(value))
 
     @field_validator("en_mantenimiento", mode="before")
     @classmethod
@@ -201,8 +227,6 @@ class ConfigUpdate(BaseModel):
             "example": {
                 "nombre_tienda": "Tienda Moda",
                 "descripcion": "Ropa para mujer, hombre y niños.",
-                "logo_url": "https://res.cloudinary.com/demo/image/upload/logo.png",
-                "favicon_url": "https://res.cloudinary.com/demo/image/upload/favicon.png",
                 "email_contacto": "contacto@tienda.com",
                 "telefono": "71234567",
                 "whatsapp": "+59171234567",

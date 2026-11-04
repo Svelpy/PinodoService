@@ -120,7 +120,7 @@ async def get_producto_color_audit(
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProductoColorResponseAudit:
-    return await ProductoColorService.get(db_session, producto_color_id)
+    return await ProductoColorService.get(db_session, producto_color_id, include_deleted=True)
 
 
 @router.patch(

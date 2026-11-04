@@ -4,8 +4,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domains.colores.schemas import ColorResponse
-from app.domains.imagenes.schemas import ImagenDetail
-from app.domains.skus.schemas import SkuDetail
+from app.domains.imagenes.schemas import ImagenDetail, ImagenDetailCreate
+from app.domains.skus.schemas import SkuDetail, SkuDetailCreate
 from app.shared.services.validators import validator_boolean
 
 
@@ -28,6 +28,54 @@ class ProductoColorCreate(BaseModel):
                 "producto_id": "55555555-5555-4555-8555-555555555555",
                 "color_id": "77777777-7777-4777-8777-777777777777",
                 "is_visible": False,
+            }
+        },
+    )
+
+
+class ProductoColorDetailCreate(BaseModel):
+    """
+    Color dentro de ProductoDetailCreate (create en un solo paso), con sus hijos
+    propios: imágenes y SKUs.
+
+    No lleva producto_id: lo asigna el service al crear el producto.
+    """
+
+    color_id: UUID = Field(...)
+    is_visible: bool = Field(default=True)
+    imagenes: list[ImagenDetailCreate] = Field(default_factory=list, max_length=30)
+    skus: list[SkuDetailCreate] = Field(default_factory=list, max_length=50)
+
+    @field_validator("is_visible", mode="before")
+    @classmethod
+    def validate_is_visible(cls, value: object) -> bool:
+        if value is None:
+            raise ValueError("La visibilidad no puede ser null.")
+        return validator_boolean(value)
+
+    @field_validator("imagenes", "skus", mode="before")
+    @classmethod
+    def validate_lists(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("La lista no puede ser null; usa [] si no hay elementos.")
+        return value
+
+    @field_validator("skus")
+    @classmethod
+    def validate_tallas_unicas(cls, value: list[SkuDetailCreate]) -> list[SkuDetailCreate]:
+        talla_ids = [sku.talla_id for sku in value]
+        if len(talla_ids) != len(set(talla_ids)):
+            raise ValueError("Una talla no puede repetirse dentro del mismo color.")
+        return value
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "color_id": "77777777-7777-4777-8777-777777777777",
+                "is_visible": True,
+                "imagenes": [ImagenDetailCreate.model_config["json_schema_extra"]["example"]],
+                "skus": [SkuDetailCreate.model_config["json_schema_extra"]["example"]],
             }
         },
     )

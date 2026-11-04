@@ -65,9 +65,91 @@ def test_patch_rechaza_horario_invalido(
 ) -> None:
     client, _, _ = route_context
 
-    response = client.patch("/config/", json={"horario": {"lunes": "20:00-09:00"}})
+    with patch.object(ConfigService, "update", new=AsyncMock()) as service:
+        invalido = client.patch("/config/", data={"horario": '{"lunes": "20:00-09:00"}'})
+        no_json = client.patch("/config/", data={"horario": "lunes 9 a 20"})
+
+    assert invalido.status_code == 422
+    assert "horario" in invalido.json()["details"]
+    assert no_json.status_code == 422
+    assert no_json.json()["details"]["horario"] == "El valor debe ser un objeto JSON válido."
+    service.assert_not_awaited()
+
+
+def test_patch_form_envia_solo_campos_presentes_y_vacio_como_null(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, current_user, db_session = route_context
+
+    with patch.object(ConfigService, "update", new=AsyncMock(return_value=_config())) as service:
+        response = client.patch(
+            "/config/",
+            data={
+                "whatsapp": "",
+                "en_mantenimiento": "true",
+                "horario": '{"Lunes": "09:00-20:00"}',
+            },
+        )
+
+    assert response.status_code == 200
+    args, kwargs = service.await_args
+    assert args[0] is db_session
+    assert args[1].model_dump(exclude_unset=True) == {
+        "whatsapp": None,
+        "en_mantenimiento": True,
+        "horario": {"lunes": "09:00-20:00"},
+    }
+    assert args[2] == current_user.id
+    assert kwargs["logo"] is None
+    assert kwargs["favicon"] is None
+    assert kwargs["eliminar_logo"] is False
+
+
+def test_patch_form_rechaza_vaciar_nombre_tienda(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, _, _ = route_context
+
+    with patch.object(ConfigService, "update", new=AsyncMock()) as service:
+        response = client.patch("/config/", data={"nombre_tienda": ""})
 
     assert response.status_code == 422
+    assert "nombre_tienda" in response.json()["details"]
+    service.assert_not_awaited()
+
+
+def test_patch_form_pasa_los_archivos_al_service(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, _, _ = route_context
+
+    with patch.object(ConfigService, "update", new=AsyncMock(return_value=_config())) as service:
+        response = client.patch(
+            "/config/",
+            data={"eliminar_favicon": "true"},
+            files={"logo": ("logo.png", b"png", "image/png")},
+        )
+
+    assert response.status_code == 200
+    kwargs = service.await_args.kwargs
+    assert kwargs["logo"].filename == "logo.png"
+    assert kwargs["favicon"] is None
+    assert kwargs["eliminar_favicon"] is True
+
+
+def test_patch_form_ignora_selector_de_archivo_vacio(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, _, _ = route_context
+
+    with patch.object(ConfigService, "update", new=AsyncMock(return_value=_config())) as service:
+        response = client.patch(
+            "/config/",
+            files={"logo": ("", b"", "application/octet-stream")},
+        )
+
+    assert response.status_code == 200
+    assert service.await_args.kwargs["logo"] is None
 
 
 def test_no_hay_post_ni_delete(

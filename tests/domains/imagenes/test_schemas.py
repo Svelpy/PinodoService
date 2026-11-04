@@ -41,3 +41,11 @@ def test_imagen_response_desde_modelo() -> None:
 def test_imagen_list_item_y_detail_no_anaden_campos() -> None:
     assert ImagenListItem.model_fields.keys() == ImagenResponse.model_fields.keys()
     assert ImagenDetail.model_fields.keys() == ImagenResponse.model_fields.keys()
+
+
+def test_ejemplo_de_biblioteca_valida_y_sigue_el_orden() -> None:
+    from app.domains.imagenes.schemas import ImagenBibliotecaItem
+
+    example = ImagenBibliotecaItem.model_config["json_schema_extra"]["example"]
+    ImagenBibliotecaItem.model_validate(example)
+    assert list(example) == list(ImagenBibliotecaItem.model_fields)

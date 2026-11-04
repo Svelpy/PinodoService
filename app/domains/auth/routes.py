@@ -13,8 +13,7 @@ from app.domains.auth.schemas import (
 )
 from app.domains.auth.services import AuthService
 from app.middlewares.limiter import limiter
-from app.shared.errors.codes import ErrorCode
-from app.shared.errors.exceptions import AppException
+from app.shared.errors.exceptions import body_validation_error
 from app.shared.schemas.errors import ErrorResponse
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -76,12 +75,20 @@ REFRESH_ERROR_RESPONSES = {
     **COMMON_ERROR_RESPONSES,
     401: {
         "model": ErrorResponse,
-        "description": "El refresh token es requerido, inválido, expiró o fue reutilizado.",
+        "description": (
+            "No se envió la cookie refresh_token, o la sesión es inválida, "
+            "expiró o fue reutilizada. Solo se evalúa después de validar el "
+            "X-CSRF-Token cuando la cookie está presente."
+        ),
         "headers": {"WWW-Authenticate": WWW_AUTHENTICATE_HEADER},
     },
     403: {
         "model": ErrorResponse,
-        "description": "El header X-CSRF-Token es inválido.",
+        "description": (
+            "Se envió la cookie refresh_token, pero el header X-CSRF-Token "
+            "falta o no le corresponde. Tiene prioridad sobre el 401 de "
+            "sesión expirada o revocada."
+        ),
     },
 }
 
@@ -89,7 +96,10 @@ LOGOUT_ERROR_RESPONSES = {
     **COMMON_ERROR_RESPONSES,
     403: {
         "model": ErrorResponse,
-        "description": "El header X-CSRF-Token es inválido.",
+        "description": (
+            "Se envió la cookie refresh_token, pero el header X-CSRF-Token "
+            "falta o no le corresponde."
+        ),
     },
 }
 
@@ -169,16 +179,8 @@ async def login(
             password=form_data.password,
         )
     except ValidationError as error:
-        error_details = {
-            ".".join(str(part) for part in item["loc"]): item["msg"]
-            for item in error.errors()
-        }
-        raise AppException(
-            "Los datos enviados no son válidos.",
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            ErrorCode.VALIDATION_ERROR,
-            error_details,
-        ) from error
+        # El formulario OAuth2 recibe el email en "username".
+        raise body_validation_error(error, {"email": "username"}) from error
 
     tokens = await AuthService.login(
         db_session,
@@ -200,10 +202,12 @@ async def login(
     response_model=TokenResponse,
     summary="Renovar access token",
     description=(
-        "Usa automáticamente la cookie HttpOnly refresh_token y requiere "
-        "X-CSRF-Token cuando existe una sesión. El frontend debe enviar "
-        "credentials: include y reemplazar el csrf_token recibido. La cookie "
-        "se rota después de un refresh exitoso."
+        "Usa automáticamente la cookie HttpOnly refresh_token. Orden de "
+        "validación: sin cookie responde 401; con cookie, exige primero un "
+        "X-CSRF-Token válido (403 si falta o no corresponde) y después "
+        "valida la sesión (401 si es inválida, expiró o fue reutilizada). "
+        "El frontend debe enviar credentials: include y reemplazar el "
+        "csrf_token recibido. La cookie se rota después de un refresh exitoso."
     ),
     responses={**TOKEN_SUCCESS_RESPONSES, **REFRESH_ERROR_RESPONSES}
 )
@@ -243,10 +247,12 @@ async def refresh(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Cerrar sesión",
     description=(
-        "Revoca la sesión asociada a la cookie HttpOnly refresh_token. El "
-        "frontend debe enviar credentials: include y X-CSRF-Token cuando "
-        "existe una sesión. El access token ya emitido continúa válido hasta "
-        "su expiración."
+        "Revoca la sesión asociada a la cookie HttpOnly refresh_token. Sin "
+        "cookie responde 204 sin hacer nada. Con cookie exige un "
+        "X-CSRF-Token válido (403 si falta o no corresponde), aunque la "
+        "sesión ya haya expirado. El frontend debe enviar credentials: "
+        "include. El access token ya emitido continúa válido hasta su "
+        "expiración."
     ),
     responses={**LOGOUT_SUCCESS_RESPONSES, **LOGOUT_ERROR_RESPONSES}
 )

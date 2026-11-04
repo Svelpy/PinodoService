@@ -109,7 +109,7 @@ async def get_seccion_audit(
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> SeccionResponseAudit:
-    return await SeccionService.get(db_session, seccion_id)
+    return await SeccionService.get(db_session, seccion_id, include_deleted=True)
 
 
 @router.patch(

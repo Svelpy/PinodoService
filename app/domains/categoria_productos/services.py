@@ -36,6 +36,29 @@ class CategoriaProductoService:
         )
 
     @classmethod
+    async def validate_categorias(
+        cls,
+        db_session: AsyncSession,
+        categoria_ids: list[UUID],
+        seccion_id: UUID,
+    ) -> None:
+        """Cada categoría debe existir y pertenecer a la sección del producto."""
+        categorias = await CategoriaRepository(db_session).get_many_by_ids(categoria_ids)
+        found_ids = {categoria.id for categoria in categorias}
+        missing_ids = [categoria_id for categoria_id in categoria_ids if categoria_id not in found_ids]
+        if missing_ids:
+            raise cls._invalid_categorias("Categorías inexistentes", missing_ids)
+
+        other_section_ids = [
+            categoria.id for categoria in categorias if categoria.seccion_id != seccion_id
+        ]
+        if other_section_ids:
+            raise cls._invalid_categorias(
+                "Categorías de otra sección que el producto",
+                other_section_ids,
+            )
+
+    @classmethod
     async def replace_categorias(
         cls,
         db_session: AsyncSession,
@@ -58,22 +81,7 @@ class CategoriaProductoService:
                 ErrorCode.RESOURCE_NOT_FOUND,
             )
 
-        categorias = await CategoriaRepository(db_session).get_many_by_ids(data.categoria_ids)
-        found_ids = {categoria.id for categoria in categorias}
-        missing_ids = [
-            categoria_id for categoria_id in data.categoria_ids if categoria_id not in found_ids
-        ]
-        if missing_ids:
-            raise cls._invalid_categorias("Categorías inexistentes", missing_ids)
-
-        other_section_ids = [
-            categoria.id for categoria in categorias if categoria.seccion_id != producto.seccion_id
-        ]
-        if other_section_ids:
-            raise cls._invalid_categorias(
-                "Categorías de otra sección que el producto",
-                other_section_ids,
-            )
+        await cls.validate_categorias(db_session, data.categoria_ids, producto.seccion_id)
 
         repository = CategoriaProductoRepository(db_session)
         current_links = await repository.list_active_by_producto(producto.id, for_update=True)

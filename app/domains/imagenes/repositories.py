@@ -2,10 +2,13 @@ from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.colores.models import Color
 from app.domains.imagenes.models import GALERIA_ORDER, Imagen
+from app.domains.producto_colores.models import ProductoColor
+from app.domains.productos.models import Producto
 from app.shared.enums import TipoImagen
 
 
@@ -87,6 +90,67 @@ class ImagenRepository:
             .limit(limit)
         )
         return list(result.scalars().all()), total
+
+    async def list_biblioteca(
+        self,
+        *,
+        offset: int,
+        limit: int,
+        producto_id: UUID | None = None,
+        color_id: UUID | None = None,
+        tipo: TipoImagen | None = None,
+        nombre: str | None = None,
+    ) -> tuple[list[tuple[Imagen, UUID, str, UUID, str, str]], int]:
+        """
+        Imágenes activas de colores y productos activos, con el producto y el
+        color de cada una, de la más reciente a la más antigua.
+
+        nombre busca coincidencias parciales en el nombre del producto, sin
+        distinguir mayúsculas.
+        """
+        filters = [
+            Imagen.is_deleted.is_(False),
+            ProductoColor.is_deleted.is_(False),
+            Producto.is_deleted.is_(False),
+        ]
+        if producto_id is not None:
+            filters.append(Producto.id == producto_id)
+        if color_id is not None:
+            filters.append(Color.id == color_id)
+        if tipo is not None:
+            filters.append(Imagen.tipo == tipo)
+        if nombre:
+            filters.append(Producto.nombre.icontains(nombre, autoescape=True))
+
+        def joined(statement: Select) -> Select:
+            return (
+                statement.join(ProductoColor, Imagen.producto_color_id == ProductoColor.id)
+                .join(Producto, ProductoColor.producto_id == Producto.id)
+                .join(Color, ProductoColor.color_id == Color.id)
+                .where(*filters)
+            )
+
+        total_result = await self.db_session.execute(
+            joined(select(func.count()).select_from(Imagen))
+        )
+        total = int(total_result.scalar_one())
+
+        result = await self.db_session.execute(
+            joined(
+                select(
+                    Imagen,
+                    Producto.id,
+                    Producto.nombre,
+                    Color.id,
+                    Color.nombre,
+                    Color.codigo_hex,
+                )
+            )
+            .order_by(Imagen.created_at.desc(), Imagen.id)
+            .offset(offset)
+            .limit(limit)
+        )
+        return [tuple(row) for row in result.all()], total
 
     def add(self, imagen: Imagen) -> None:
         self.db_session.add(imagen)

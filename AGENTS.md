@@ -394,6 +394,33 @@ Por tanto:
 - Todo elemento embebido excluye los registros con `is_deleted=True`. En
   endpoints públicos aplica además las reglas de visibilidad del dominio.
 
+### Create en un solo paso
+
+Un dominio con hijos propios puede crear su árbol completo en una sola
+petición. Se hace en su `POST /`, que recibe `<X>DetailCreate` y responde
+`<X>Detail`, el mismo schema que `GET /{id}`.
+
+```text
+<X>DetailCreate     → hereda de <X>Create
+                      + hijos propios como list[<Hijo>DetailCreate]
+                      + asociaciones N:M como <relacion>_ids: list[id]
+
+<Hijo>DetailCreate  → campos de <Hijo>Create sin la foreign key de dueño
+                      + sus hijos propios como list[<Nieto>DetailCreate]
+```
+
+- La foreign key de dueño nunca se envía; la asigna el service.
+- Las referencias se envían siempre como id.
+- No contiene `id` ni campos de auditoría.
+- Si `<Hijo>Create` solo añade la foreign key de dueño, hereda de
+  `<Hijo>DetailCreate`.
+- El schema valida la estructura: hijos repetidos dentro del padre,
+  `max_length` en cada colección y `<relacion>_ids` deduplicados.
+- El service aplica las mismas reglas que el create individual de cada hijo,
+  en una sola transacción.
+- Los create individuales de los hijos se conservan para editar un árbol ya
+  existente.
+
 ---
 
 ## 7. Validaciones
@@ -1123,7 +1150,8 @@ de imports.
 2. Validadores reutilizables en `shared/services/validators.py`.
 3. Schemas de todos los dominios, en dos rondas:
    - Ronda 1: `Create`, `Update`, `Response` y `ResponseAudit`.
-   - Ronda 2: `ListItem` y `Detail` de los dominios con foreign keys.
+   - Ronda 2: `ListItem` y `Detail` de los dominios con foreign keys, y
+     `DetailCreate` de los dominios que creen su árbol en un solo paso.
 
    Cada ronda se valida con sus tests de schemas.
 
@@ -1148,6 +1176,8 @@ base de datos de desarrollo, en este orden:
    - Se declaran los `Relationship()`.
    - El repository carga los embebidos.
    - `GET /` pasa a `PaginatedResponse[ListItem]` y `GET /{id}` a `Detail`.
+   - `POST /` pasa a recibir `DetailCreate` y responder `Detail`, en los
+     dominios que lo definan.
    - Cada `Detail` se prueba con datos reales de todo su árbol.
 
 La segunda vuelta no empieza hasta terminar la primera de todos los

@@ -91,6 +91,75 @@ class SkuStockInput(BaseModel):
     )
 
 
+class SkuPrecioUpdate(BaseModel):
+    """
+    Precio parcial del PATCH: solo cambia lo enviado y el resto se conserva.
+
+    rebajado: null quita la rebaja junto con su fecha. El service valida el
+    precio resultante con las reglas de SkuPrecio.
+    """
+
+    normal: Decimal | None = Field(default=None, max_digits=10, decimal_places=2)
+    rebajado: Decimal | None = Field(default=None, max_digits=10, decimal_places=2)
+    rebaja_hasta: date | None = Field(default=None)
+
+    @field_validator("normal", mode="before")
+    @classmethod
+    def validate_normal(cls, value: object) -> Decimal:
+        if value is None:
+            raise ValueError("El precio normal no puede ser null.")
+        return validator_positive_money(value)
+
+    @field_validator("rebajado", mode="before")
+    @classmethod
+    def validate_rebajado(cls, value: object) -> Decimal | None:
+        if value is None:
+            return None
+        return validator_positive_money(value)
+
+    @field_validator("rebaja_hasta", mode="before")
+    @classmethod
+    def validate_rebaja_hasta(cls, value: object) -> date | None:
+        if value is None:
+            return None
+        return validator_date(value)
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "normal": 29.95,
+                "rebajado": 19.95,
+                "rebaja_hasta": "2026-12-31",
+            }
+        },
+    )
+
+
+class SkuStockUpdate(BaseModel):
+    """Stock parcial del PATCH: solo cambia lo enviado y el resto se conserva."""
+
+    cantidad: int | None = Field(default=None, ge=0)
+    minimo: int | None = Field(default=None, ge=0)
+
+    @field_validator("cantidad", "minimo", mode="before")
+    @classmethod
+    def validate_non_negative(cls, value: object) -> int:
+        if value is None:
+            raise ValueError("El valor de stock no puede ser null.")
+        return validator_non_negative_integer(value)
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "cantidad": 20,
+                "minimo": 3,
+            }
+        },
+    )
+
+
 class SkuStock(BaseModel):
     """Contenido del JSONB stock tal como se expone en la respuesta."""
 
@@ -109,8 +178,14 @@ class SkuStock(BaseModel):
     )
 
 
-class SkuCreate(BaseModel):
-    producto_color_id: UUID = Field(...)
+class SkuDetailCreate(BaseModel):
+    """
+    SKU dentro de ProductoColorDetailCreate (create en un solo paso).
+
+    No lleva producto_color_id: lo asigna el service al crear su color. Es la
+    base de SkuCreate, para que ambos apliquen las mismas validaciones.
+    """
+
     talla_id: UUID = Field(...)
     codigo_barras: str | None = Field(default=None, min_length=1, max_length=50)
     is_visible: bool = Field(default=True)
@@ -142,7 +217,6 @@ class SkuCreate(BaseModel):
         extra="forbid",
         json_schema_extra={
             "example": {
-                "producto_color_id": "88888888-8888-4888-8888-888888888888",
                 "talla_id": "99999999-9999-4999-8999-999999999999",
                 "codigo_barras": "8412345678905",
                 "is_visible": True,
@@ -153,18 +227,34 @@ class SkuCreate(BaseModel):
     )
 
 
+class SkuCreate(SkuDetailCreate):
+    """SKU creado de forma individual dentro de un color que ya existe."""
+
+    producto_color_id: UUID = Field(...)
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                **SkuDetailCreate.model_config["json_schema_extra"]["example"],
+                "producto_color_id": "88888888-8888-4888-8888-888888888888",
+            }
+        },
+    )
+
+
 class SkuUpdate(BaseModel):
     """
     producto_color_id es la foreign key de dueño y no se modifica.
 
-    precio y stock se reemplazan completos cuando se envían.
+    Dentro de precio y stock también cambia solo lo enviado.
     """
 
     talla_id: UUID | None = Field(default=None)
     codigo_barras: str | None = Field(default=None, min_length=1, max_length=50)
     is_visible: bool | None = Field(default=None)
-    precio: SkuPrecio | None = Field(default=None)
-    stock: SkuStockInput | None = Field(default=None)
+    precio: SkuPrecioUpdate | None = Field(default=None)
+    stock: SkuStockUpdate | None = Field(default=None)
 
     @field_validator("talla_id")
     @classmethod
@@ -239,6 +329,47 @@ class SkuResponse(BaseModel):
                 "stock": {"cantidad": 12, "minimo": 3, "actualizado": "2026-10-29T15:00:00Z"},
                 "created_at": "2026-10-29T14:30:00Z",
                 "updated_at": "2026-10-29T15:00:00Z",
+            }
+        },
+    )
+
+
+class SkuInventarioItem(SkuResponse):
+    """
+    SKU con el producto, el color y la talla a los que pertenece, para el
+    inventario y la búsqueda en caja.
+
+    Schema especial de lectura: a diferencia de SkuListItem, muestra datos del
+    dueño. Son campos planos porque skus no puede importar los schemas de
+    productos sin crear un ciclo de imports.
+
+    precio_vigente es el precio que se cobra hoy: el rebajado mientras la rebaja
+    esté vigente (rebaja_hasta incluido o sin fecha) y, si no, el normal.
+    """
+
+    precio_vigente: Decimal
+    producto_id: UUID
+    producto_nombre: str
+    color_id: UUID
+    color_nombre: str
+    color_codigo_hex: str
+    talla_etiqueta: str
+
+    @field_serializer("precio_vigente", when_used="json")
+    def serialize_precio_vigente(self, value: Decimal) -> float:
+        return float(value)
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                **SkuResponse.model_config["json_schema_extra"]["example"],
+                "precio_vigente": 19.95,
+                "producto_id": "55555555-5555-4555-8555-555555555555",
+                "producto_nombre": "Camisa Oxford",
+                "color_id": "77777777-7777-4777-8777-777777777777",
+                "color_nombre": "Azul marino",
+                "color_codigo_hex": "#1E3A8A",
+                "talla_etiqueta": "M",
             }
         },
     )

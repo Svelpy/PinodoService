@@ -80,7 +80,7 @@ class ProductoColorService:
             await db_session.refresh(producto_color)
 
     @classmethod
-    async def _validate_color(cls, db_session: AsyncSession, color_id: UUID) -> None:
+    async def validate_color(cls, db_session: AsyncSession, color_id: UUID) -> None:
         if await ColorRepository(db_session).get_by_id(color_id) is None:
             raise cls._invalid_reference("color_id", "El color no existe.")
 
@@ -172,7 +172,7 @@ class ProductoColorService:
     ) -> ProductoColor:
         if await ProductoRepository(db_session).get_by_id(data.producto_id) is None:
             raise cls._invalid_reference("producto_id", "El producto no existe.")
-        await cls._validate_color(db_session, data.color_id)
+        await cls.validate_color(db_session, data.color_id)
 
         repository = ProductoColorRepository(db_session)
         await cls._validate_unique_color(repository, data.producto_id, data.color_id)
@@ -210,7 +210,7 @@ class ProductoColorService:
             return producto_color
 
         if changes.get("color_id", producto_color.color_id) != producto_color.color_id:
-            await cls._validate_color(db_session, changes["color_id"])
+            await cls.validate_color(db_session, changes["color_id"])
             await cls._validate_unique_color(
                 ProductoColorRepository(db_session),
                 producto_color.producto_id,
