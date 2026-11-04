@@ -42,8 +42,13 @@ class CategoriaProductoService:
         categoria_ids: list[UUID],
         seccion_id: UUID,
     ) -> None:
-        """Cada categoría debe existir y pertenecer a la sección del producto."""
-        categorias = await CategoriaRepository(db_session).get_many_by_ids(categoria_ids)
+        """
+        Cada categoría debe existir, pertenecer a la sección del producto y ser
+        una hoja: los productos se asignan a la categoría más específica, y las
+        categorías padre los muestran a través de sus subcategorías.
+        """
+        repository = CategoriaRepository(db_session)
+        categorias = await repository.get_many_by_ids(categoria_ids)
         found_ids = {categoria.id for categoria in categorias}
         missing_ids = [categoria_id for categoria_id in categoria_ids if categoria_id not in found_ids]
         if missing_ids:
@@ -56,6 +61,13 @@ class CategoriaProductoService:
             raise cls._invalid_categorias(
                 "Categorías de otra sección que el producto",
                 other_section_ids,
+            )
+
+        con_subcategorias = await repository.list_ids_with_active_children(categoria_ids)
+        if con_subcategorias:
+            raise cls._invalid_categorias(
+                "Categorías con subcategorías; asigna una de sus subcategorías",
+                [categoria_id for categoria_id in categoria_ids if categoria_id in con_subcategorias],
             )
 
     @classmethod

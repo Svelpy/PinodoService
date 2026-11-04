@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -12,6 +13,15 @@ from app.domains.categorias.repositories import CategoriaRepository
 from app.domains.productos.models import Producto
 from app.domains.productos.repositories import ProductoRepository
 from app.shared.errors.exceptions import AppException
+
+
+@pytest.fixture(autouse=True)
+def _categorias_hoja() -> Iterator[AsyncMock]:
+    """Por defecto, ninguna categoría tiene subcategorías (todas son hojas)."""
+    with patch.object(
+        CategoriaRepository, "list_ids_with_active_children", new=AsyncMock(return_value=set())
+    ) as con_hijas:
+        yield con_hijas
 
 
 def _session() -> MagicMock:
@@ -180,3 +190,30 @@ async def test_producto_inexistente_responde_404() -> None:
             )
 
     assert error.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_rechaza_categorias_con_subcategorias_sin_cambiar_nada(
+    _categorias_hoja: AsyncMock,
+) -> None:
+    producto = Producto(seccion_id=uuid4(), nombre="Camisa")
+    ropa = _categoria(producto.seccion_id, "Ropa")
+    camisas = _categoria(producto.seccion_id, "Camisas")
+    session = _session()
+    _categorias_hoja.return_value = {ropa.id}
+
+    p1, p2, p3, p4 = _patches(producto, [ropa, camisas], [])
+    with p1, p2, p3, p4:
+        with pytest.raises(AppException) as error:
+            await CategoriaProductoService.replace_categorias(
+                session,
+                producto.id,
+                ProductoCategoriasUpdate(categoria_ids=[camisas.id, ropa.id]),
+                uuid4(),
+            )
+
+    assert error.value.status_code == 422
+    detalle = error.value.details["categoria_ids"]
+    assert str(ropa.id) in detalle and str(camisas.id) not in detalle
+    session.add.assert_not_called()
+    session.commit.assert_not_awaited()

@@ -35,7 +35,8 @@ ERROR_RESPONSES = {
     description=(
         "Deja al producto exactamente en las categorías enviadas: conserva las que "
         "ya tenía, quita las que faltan y añade las nuevas. [] quita todas. Cada "
-        "categoría debe existir y pertenecer a la misma sección que el producto. "
+        "categoría debe existir, pertenecer a la misma sección que el producto y "
+        "no tener subcategorías: se asigna siempre la más específica. "
         "Devuelve las categorías resultantes."
     ),
     responses=ERROR_RESPONSES,

@@ -43,7 +43,8 @@ def _error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
     summary="Listar productos",
     description=(
         "Ordenados del más reciente al más antiguo. categoria_id devuelve los "
-        "productos asignados a esa categoría; nombre busca coincidencias parciales. "
+        "productos asignados a esa categoría o a cualquiera de sus subcategorías; "
+        "nombre busca coincidencias parciales. "
         "Cada producto trae un resumen con su portada, el rango de precios vigentes "
         "hoy, su stock total y sus colores."
     ),

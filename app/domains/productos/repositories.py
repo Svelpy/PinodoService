@@ -3,7 +3,7 @@ from uuid import UUID
 
 from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 
 from app.domains.categoria_productos.models import CategoriaProducto
 from app.domains.categorias.models import Categoria
@@ -69,8 +69,9 @@ class ProductoRepository:
     ) -> tuple[list[Producto], int]:
         """
         Listado paginado con la sección cargada para el ListItem. categoria_id
-        filtra por enlace activo con esa categoría;
-        nombre busca coincidencias parciales sin distinguir mayúsculas.
+        devuelve los productos asignados a esa categoría o a cualquiera de sus
+        subcategorías; nombre busca coincidencias parciales sin distinguir
+        mayúsculas.
         """
         filters = []
         if not include_deleted:
@@ -78,10 +79,24 @@ class ProductoRepository:
         if seccion_id is not None:
             filters.append(Producto.seccion_id == seccion_id)
         if categoria_id is not None:
+            # La categoría y todas sus descendientes activas: una categoría padre
+            # muestra los productos de sus subcategorías.
+            descendientes = (
+                select(Categoria.id)
+                .where(Categoria.id == categoria_id)
+                .cte("descendientes", recursive=True)
+            )
+            subcategoria = aliased(Categoria)
+            descendientes = descendientes.union_all(
+                select(subcategoria.id).where(
+                    subcategoria.parent_id == descendientes.c.id,
+                    subcategoria.is_deleted.is_(False),
+                )
+            )
             filters.append(
                 exists().where(
                     CategoriaProducto.producto_id == Producto.id,
-                    CategoriaProducto.categoria_id == categoria_id,
+                    CategoriaProducto.categoria_id.in_(select(descendientes.c.id)),
                     CategoriaProducto.is_deleted.is_(False),
                 )
             )

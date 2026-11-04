@@ -158,6 +158,7 @@ async def test_update_rechaza_ciclo_con_una_descendiente() -> None:
     with (
         patch.object(CategoriaService, "get", new=AsyncMock(return_value=ropa)),
         patch.object(CategoriaRepository, "get_by_id", new=_by_id(ropa, vestidos, largos)),
+        patch.object(CategoriaRepository, "has_active_products", new=AsyncMock(return_value=False)),
     ):
         with pytest.raises(AppException) as error:
             await CategoriaService.update(
@@ -182,6 +183,7 @@ async def test_update_mueve_dentro_del_arbol() -> None:
     with (
         patch.object(CategoriaService, "get", new=AsyncMock(return_value=botas)),
         patch.object(CategoriaRepository, "get_by_id", new=_by_id(ropa, zapatos, botas)),
+        patch.object(CategoriaRepository, "has_active_products", new=AsyncMock(return_value=False)),
     ):
         result = await CategoriaService.update(
             session,
@@ -371,3 +373,46 @@ async def test_arbol_con_seccion_inexistente_responde_404() -> None:
             await CategoriaService.arbol(_session(), seccion_id=uuid4())
 
     assert error.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_rechaza_padre_con_productos() -> None:
+    seccion = _seccion()
+    padre = _categoria(seccion.id, "Camisas")
+
+    with (
+        patch.object(SeccionRepository, "get_by_id", new=AsyncMock(return_value=seccion)),
+        patch.object(CategoriaRepository, "get_by_id", new=_by_id(padre)),
+        patch.object(CategoriaRepository, "has_active_products", new=AsyncMock(return_value=True)),
+        patch.object(CategoriaRepository, "add") as add,
+    ):
+        with pytest.raises(AppException) as error:
+            await CategoriaService.create(
+                _session(),
+                CategoriaCreate(seccion_id=seccion.id, parent_id=padre.id, nombre="Manga corta"),
+                uuid4(),
+            )
+
+    assert error.value.status_code == 409
+    assert "parent_id" in error.value.details
+    add.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_rechaza_mover_bajo_un_padre_con_productos() -> None:
+    seccion = _seccion()
+    padre = _categoria(seccion.id, "Camisas")
+    hija = _categoria(seccion.id, "Manga corta")
+    session = _session()
+
+    with (
+        patch.object(CategoriaService, "get", new=AsyncMock(return_value=hija)),
+        patch.object(CategoriaRepository, "get_by_id", new=_by_id(padre, hija)),
+        patch.object(CategoriaRepository, "has_active_products", new=AsyncMock(return_value=True)),
+    ):
+        with pytest.raises(AppException) as error:
+            await CategoriaService.update(session, hija.id, CategoriaUpdate(parent_id=padre.id), uuid4())
+
+    assert error.value.status_code == 409
+    assert hija.parent_id is None
+    session.commit.assert_not_awaited()

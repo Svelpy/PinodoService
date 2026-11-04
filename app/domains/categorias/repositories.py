@@ -127,6 +127,17 @@ class CategoriaRepository:
         )
         return bool(result.scalar_one())
 
+    async def list_ids_with_active_children(self, categoria_ids: list[UUID]) -> set[UUID]:
+        """De esas categorías, las que tienen alguna subcategoría activa (no son hojas)."""
+        if not categoria_ids:
+            return set()
+        result = await self.db_session.execute(
+            select(Categoria.parent_id)
+            .where(Categoria.parent_id.in_(categoria_ids), Categoria.is_deleted.is_(False))
+            .distinct()
+        )
+        return set(result.scalars().all())
+
     async def has_active_products(self, categoria_id: UUID) -> bool:
         result = await self.db_session.execute(
             select(

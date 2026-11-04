@@ -95,8 +95,12 @@ class CategoriaService:
         categoria_id: UUID | None = None,
     ) -> None:
         """
-        El padre debe existir, pertenecer a la misma sección y, al mover una
-        categoría existente, no ser ella misma ni una de sus descendientes.
+        El padre debe existir, pertenecer a la misma sección, no tener productos
+        asignados y, al mover una categoría existente, no ser ella misma ni una
+        de sus descendientes.
+
+        Los productos solo se asignan a categorías hoja: si el padre tuviera
+        productos, al darle una subcategoría quedarían asignados a un padre.
         """
         if parent_id == categoria_id:
             raise cls._invalid_reference(
@@ -111,6 +115,18 @@ class CategoriaService:
             raise cls._invalid_reference(
                 "parent_id",
                 "La categoría padre pertenece a otra sección.",
+            )
+        if await repository.has_active_products(parent_id):
+            raise AppException(
+                "La categoría padre tiene productos asignados.",
+                409,
+                ErrorCode.CONFLICT,
+                {
+                    "parent_id": (
+                        "Quita antes sus productos: solo las categorías sin "
+                        "subcategorías pueden tener productos."
+                    )
+                },
             )
 
         if categoria_id is None:
