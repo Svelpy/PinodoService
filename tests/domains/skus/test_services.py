@@ -68,8 +68,13 @@ async def test_create_guarda_precio_y_stock_como_json() -> None:
         patch.object(SkuRepository, "get_active_by_color_and_talla", new=AsyncMock(return_value=None)),
         patch.object(SkuRepository, "get_active_by_codigo_barras", new=AsyncMock()) as by_codigo,
         patch.object(SkuRepository, "add") as add,
+        patch.object(
+            SkuService, "get", new=AsyncMock(side_effect=lambda *a, **k: add.call_args.args[0])
+        ) as get,
     ):
         sku = await SkuService.create(session, _create_data(), actor_id)
+
+    get.assert_awaited_once_with(session, sku.id, load_detail=True)
 
     by_codigo.assert_not_awaited()
     assert sku.precio == {"normal": 29.95, "rebajado": 19.9, "rebaja_hasta": "2026-12-31"}

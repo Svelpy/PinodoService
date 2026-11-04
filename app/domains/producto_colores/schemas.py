@@ -9,36 +9,12 @@ from app.domains.skus.schemas import SkuDetail, SkuDetailCreate
 from app.shared.services.validators import validator_boolean
 
 
-class ProductoColorCreate(BaseModel):
-    producto_id: UUID = Field(...)
-    color_id: UUID = Field(...)
-    is_visible: bool = Field(default=True)
-
-    @field_validator("is_visible", mode="before")
-    @classmethod
-    def validate_is_visible(cls, value: object) -> bool:
-        if value is None:
-            raise ValueError("La visibilidad no puede ser null.")
-        return validator_boolean(value)
-
-    model_config = ConfigDict(
-        extra="forbid",
-        json_schema_extra={
-            "example": {
-                "producto_id": "55555555-5555-4555-8555-555555555555",
-                "color_id": "77777777-7777-4777-8777-777777777777",
-                "is_visible": False,
-            }
-        },
-    )
-
-
 class ProductoColorDetailCreate(BaseModel):
     """
-    Color dentro de ProductoDetailCreate (create en un solo paso), con sus hijos
-    propios: imágenes y SKUs.
+    Color con sus hijos propios (imágenes y SKUs), para crearlo en un solo paso.
 
-    No lleva producto_id: lo asigna el service al crear el producto.
+    Se usa dentro de ProductoDetailCreate, sin producto_id porque lo asigna el
+    service al crear el producto, y como base de ProductoColorCreate.
     """
 
     color_id: UUID = Field(...)
@@ -60,12 +36,23 @@ class ProductoColorDetailCreate(BaseModel):
             raise ValueError("La lista no puede ser null; usa [] si no hay elementos.")
         return value
 
+    @field_validator("imagenes")
+    @classmethod
+    def validate_urls_unicas(cls, value: list[ImagenDetailCreate]) -> list[ImagenDetailCreate]:
+        urls = [imagen.url for imagen in value]
+        if len(urls) != len(set(urls)):
+            raise ValueError("Una imagen no puede repetirse dentro del mismo color.")
+        return value
+
     @field_validator("skus")
     @classmethod
     def validate_tallas_unicas(cls, value: list[SkuDetailCreate]) -> list[SkuDetailCreate]:
         talla_ids = [sku.talla_id for sku in value]
         if len(talla_ids) != len(set(talla_ids)):
             raise ValueError("Una talla no puede repetirse dentro del mismo color.")
+        codigos = [sku.codigo_barras for sku in value if sku.codigo_barras is not None]
+        if len(codigos) != len(set(codigos)):
+            raise ValueError("Un código de barras no puede repetirse dentro del mismo color.")
         return value
 
     model_config = ConfigDict(
@@ -76,6 +63,26 @@ class ProductoColorDetailCreate(BaseModel):
                 "is_visible": True,
                 "imagenes": [ImagenDetailCreate.model_config["json_schema_extra"]["example"]],
                 "skus": [SkuDetailCreate.model_config["json_schema_extra"]["example"]],
+            }
+        },
+    )
+
+
+class ProductoColorCreate(ProductoColorDetailCreate):
+    """
+    Entrada de POST /producto-colores/: añade a un producto existente un color
+    con sus imágenes y SKUs, en una transacción. Sin imagenes ni skus crea solo
+    el color.
+    """
+
+    producto_id: UUID = Field(...)
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                **ProductoColorDetailCreate.model_config["json_schema_extra"]["example"],
+                "producto_id": "55555555-5555-4555-8555-555555555555",
             }
         },
     )

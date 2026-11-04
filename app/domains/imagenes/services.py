@@ -158,20 +158,37 @@ class ImagenService:
         logger.info("Imagen pendiente subida: actor_id=%s url=%s", actor_id, uploaded["url"])
         return uploaded["url"]
 
+    @staticmethod
+    def folder_for(producto_id: UUID, producto_color_id: UUID) -> str:
+        """Carpeta de Cloudinary, relativa a la del proyecto, de las imágenes de un color."""
+        return f"productos/{producto_id}/{producto_color_id}"
+
+    @staticmethod
+    async def validate_upload_url(db_session: AsyncSession, url: str, settings: Settings) -> None:
+        """
+        La url debe ser una subida de POST /imagenes/uploads y no estar ya
+        asociada a otra imagen activa, porque un archivo vive en la carpeta de
+        un solo color.
+        """
+        if not CloudinaryService.is_uploaded_image_url(url, settings):
+            message = "La imagen debe subirse antes con POST /imagenes/uploads."
+            raise AppException(message, 422, ErrorCode.VALIDATION_ERROR, {"url": message})
+        if await ImagenRepository(db_session).get_active_by_url(url) is not None:
+            message = "La imagen ya está asociada a otro color."
+            raise AppException(message, 409, ErrorCode.CONFLICT, {"url": message})
+
     @classmethod
     async def create(
         cls,
         db_session: AsyncSession,
         data: ImagenCreate,
-        file: UploadFile,
         actor_id: UUID,
         settings: Settings,
     ) -> Imagen:
         """
-        Sube el archivo a Cloudinary y registra la imagen.
-
-        El color del producto se valida antes de subir, para no dejar archivos
-        huérfanos; si el registro falla, el archivo recién subido se elimina.
+        Asocia a un color existente una imagen ya subida con POST
+        /imagenes/uploads. Tras el commit, la imagen se mueve en Cloudinary a la
+        carpeta de su color y deja de estar pendiente; su url no cambia.
         """
         producto_color = await ProductoColorRepository(db_session).get_by_id(
             data.producto_color_id
@@ -183,25 +200,15 @@ class ImagenService:
                 ErrorCode.VALIDATION_ERROR,
                 {"producto_color_id": "El color del producto no existe."},
             )
+        await cls.validate_upload_url(db_session, data.url, settings)
 
-        uploaded = await CloudinaryService.upload_image(
-            file,
-            f"productos/{producto_color.producto_id}/{producto_color.id}",
+        imagen = Imagen(**data.model_dump(), created_by=actor_id, updated_by=actor_id)
+        ImagenRepository(db_session).add(imagen)
+        await cls._commit(db_session, imagen)
+        await CloudinaryService.confirm_pending_uploads(
+            {data.url: cls.folder_for(producto_color.producto_id, producto_color.id)},
             settings,
         )
-
-        imagen = Imagen(
-            **data.model_dump(),
-            url=uploaded["url"],
-            created_by=actor_id,
-            updated_by=actor_id,
-        )
-        try:
-            ImagenRepository(db_session).add(imagen)
-            await cls._commit(db_session, imagen)
-        except Exception:
-            await CloudinaryService.safe_delete_image(uploaded["url"])
-            raise
 
         logger.info("Imagen creada: imagen_id=%s actor_id=%s", imagen.id, actor_id)
         return imagen

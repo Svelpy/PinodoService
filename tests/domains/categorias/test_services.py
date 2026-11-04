@@ -52,12 +52,20 @@ async def test_create_genera_slug_y_valida_unicidad_dentro_de_la_seccion() -> No
             new=AsyncMock(return_value=None),
         ) as get_by_slug,
         patch.object(CategoriaRepository, "add") as add,
+        patch.object(
+            CategoriaService,
+            "get",
+            new=AsyncMock(side_effect=lambda *a, **k: add.call_args.args[0]),
+        ) as get,
     ):
         categoria = await CategoriaService.create(
             session,
             CategoriaCreate(seccion_id=seccion.id, nombre="Vestidos Largos"),
             actor_id,
         )
+
+    # Responde lo mismo que GET /{id}: se recarga con su Detail.
+    get.assert_awaited_once_with(session, categoria.id, load_detail=True)
 
     get_by_slug.assert_awaited_once_with(seccion.id, "vestidos-largos", exclude_id=None)
     assert categoria.slug == "vestidos-largos"

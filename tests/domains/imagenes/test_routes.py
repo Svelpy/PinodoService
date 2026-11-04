@@ -49,7 +49,7 @@ def route_context() -> Iterator[tuple[TestClient, CurrentUser, MagicMock]]:
         yield client, current_user, db_session
 
 
-def test_post_multipart_pasa_archivo_y_datos_al_service(
+def test_post_json_pasa_los_datos_al_service(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
     client, current_user, db_session = route_context
@@ -58,56 +58,58 @@ def test_post_multipart_pasa_archivo_y_datos_al_service(
     with patch.object(ImagenService, "create", new=AsyncMock(return_value=_imagen())) as service:
         response = client.post(
             "/imagenes/",
-            data={"producto_color_id": str(producto_color_id), "tipo": "DETALLE"},
-            files={"file": ("foto.png", b"\x89PNG", "image/png")},
+            json={"producto_color_id": str(producto_color_id), "url": SUBIDA, "tipo": "DETALLE"},
         )
 
     assert response.status_code == 201
-    assert response.json()["url"] == URL
     args = service.await_args.args
     assert args[0] is db_session
-    assert args[1].producto_color_id == producto_color_id
-    assert args[1].tipo is TipoImagen.DETALLE
-    assert args[2].filename == "foto.png"
-    assert args[3] == current_user.id
+    assert (args[1].producto_color_id, args[1].url, args[1].tipo) == (
+        producto_color_id,
+        SUBIDA,
+        TipoImagen.DETALLE,
+    )
+    assert args[2] == current_user.id
 
 
-def test_post_tipo_por_defecto_es_modelo(
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"url": "https://res.cloudinary.com/demo/image/upload/v1/pinodo/imagenes/a.jpg"},
+        {"producto_color_id": "11111111-1111-4111-8111-111111111111"},
+        {"producto_color_id": "11111111-1111-4111-8111-111111111111", "url": "x", "tipo": "BODEGON"},
+    ],
+)
+def test_post_rechaza_peticiones_incompletas(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+    body: dict[str, str],
+) -> None:
+    client, _, _ = route_context
+
+    with patch.object(ImagenService, "create", new=AsyncMock()) as service:
+        response = client.post("/imagenes/", json=body)
+
+    assert response.status_code == 422
+    service.assert_not_awaited()
+
+
+def test_post_ya_no_acepta_archivos(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
     client, _, _ = route_context
 
-    with patch.object(ImagenService, "create", new=AsyncMock(return_value=_imagen())) as service:
-        client.post(
+    with patch.object(ImagenService, "create", new=AsyncMock()) as service:
+        response = client.post(
             "/imagenes/",
             data={"producto_color_id": str(uuid4())},
             files={"file": ("foto.png", b"\x89PNG", "image/png")},
         )
 
-    assert service.await_args.args[1].tipo is TipoImagen.MODELO
-
-
-@pytest.mark.parametrize(
-    ("data", "files"),
-    [
-        ({"producto_color_id": str(uuid4())}, None),
-        ({}, {"file": ("foto.png", b"\x89PNG", "image/png")}),
-        (
-            {"producto_color_id": str(uuid4()), "tipo": "BODEGON"},
-            {"file": ("foto.png", b"\x89PNG", "image/png")},
-        ),
-    ],
-)
-def test_post_rechaza_peticiones_incompletas(
-    route_context: tuple[TestClient, CurrentUser, MagicMock],
-    data: dict[str, str],
-    files: dict[str, tuple[str, bytes, str]] | None,
-) -> None:
-    client, _, _ = route_context
-
-    response = client.post("/imagenes/", data=data, files=files)
-
     assert response.status_code == 422
+    service.assert_not_awaited()
+
+
+SUBIDA = "https://res.cloudinary.com/demo/image/upload/v1/pinodo/imagenes/foto.jpg"
 
 
 def test_list_filtra_por_color_y_tipo(
@@ -169,7 +171,7 @@ def test_lecturas_declaran_list_item_y_detail(
     assert schema_ref("/imagenes/{imagen_id}/audit").endswith("/ImagenResponseAudit")
 
 
-PENDIENTE = "https://res.cloudinary.com/demo/image/upload/v1/pinodo/pendientes/foto.jpg"
+PENDIENTE = "https://res.cloudinary.com/demo/image/upload/v1/pinodo/imagenes/foto.jpg"
 
 
 def test_upload_pendiente_devuelve_la_url_sin_crear_registro(

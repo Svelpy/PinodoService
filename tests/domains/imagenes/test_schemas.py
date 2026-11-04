@@ -14,14 +14,25 @@ from app.domains.imagenes.schemas import (
 from app.shared.enums import TipoImagen
 
 
-def test_imagen_create_tipo_modelo_por_defecto() -> None:
-    assert ImagenCreate(producto_color_id=uuid4()).tipo is TipoImagen.MODELO
+SUBIDA = "https://res.cloudinary.com/demo/image/upload/v1/pinodo/imagenes/foto.jpg"
 
 
-@pytest.mark.parametrize("overrides", [{"url": "https://a.com/x.jpg"}, {"tipo": "BODEGON"}, {"tipo": None}])
-def test_imagen_create_rechaza_url_y_tipo_invalido(overrides: dict[str, object]) -> None:
+def test_imagen_create_hereda_url_y_tipo_y_exige_el_color() -> None:
+    data = ImagenCreate(producto_color_id=uuid4(), url=SUBIDA)
+
+    assert data.tipo is TipoImagen.MODELO
+    example = ImagenCreate.model_config["json_schema_extra"]["example"]
+    ImagenCreate.model_validate(example)
+    assert list(example) == list(ImagenCreate.model_fields)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"url": None}, {"url": "no-es-url"}, {"tipo": "BODEGON"}, {"tipo": None}, {"producto_color_id": None}],
+)
+def test_imagen_create_rechaza_datos_invalidos(overrides: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
-        ImagenCreate.model_validate({"producto_color_id": str(uuid4()), **overrides})
+        ImagenCreate.model_validate({"producto_color_id": str(uuid4()), "url": SUBIDA, **overrides})
 
 
 def test_imagen_update_no_permite_cambiar_dueno_ni_null() -> None:

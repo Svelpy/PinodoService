@@ -12,7 +12,7 @@ from app.domains.skus.schemas import SkuCreate, SkuDetailCreate
 from app.shared.enums import TipoImagen
 
 
-URL = "https://res.cloudinary.com/demo/image/upload/v1/pinodo/pendientes/foto.jpg"
+URL = "https://res.cloudinary.com/demo/image/upload/v1/pinodo/imagenes/foto.jpg"
 
 
 def _sku(**overrides: object) -> dict[str, object]:
@@ -194,5 +194,19 @@ def test_producto_rechaza_codigo_de_barras_repetido_en_el_arbol() -> None:
                     _color(skus=[_sku(codigo_barras="841")]),
                     _color(skus=[_sku(codigo_barras="841")]),
                 ],
+            }
+        )
+
+
+def test_rechaza_la_misma_imagen_dos_veces_en_un_color_o_en_el_producto() -> None:
+    imagen = {"url": URL}
+    with pytest.raises(ValidationError, match="imagen no puede repetirse dentro del mismo color"):
+        ProductoColorDetailCreate.model_validate(_color(imagenes=[imagen, imagen]))
+    with pytest.raises(ValidationError, match="imagen no puede repetirse dentro del mismo producto"):
+        ProductoDetailCreate.model_validate(
+            {
+                "seccion_id": str(uuid4()),
+                "nombre": "Camisa",
+                "colores": [_color(imagenes=[imagen]), _color(imagenes=[imagen])],
             }
         )

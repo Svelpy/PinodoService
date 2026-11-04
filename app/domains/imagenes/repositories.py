@@ -152,5 +152,12 @@ class ImagenRepository:
         )
         return [tuple(row) for row in result.all()], total
 
+    async def get_active_by_url(self, url: str) -> Imagen | None:
+        """Imagen activa que ya usa ese archivo, si existe."""
+        result = await self.db_session.execute(
+            select(Imagen).where(Imagen.url == url, Imagen.is_deleted.is_(False)).limit(1)
+        )
+        return result.scalar_one_or_none()
+
     def add(self, imagen: Imagen) -> None:
         self.db_session.add(imagen)

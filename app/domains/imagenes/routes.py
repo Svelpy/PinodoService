@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
@@ -13,7 +13,6 @@ from app.domains.imagenes.schemas import (
     ImagenCreate,
     ImagenDetail,
     ImagenListItem,
-    ImagenResponse,
     ImagenResponseAudit,
     ImagenUpdate,
     ImagenUploadResponse,
@@ -31,6 +30,7 @@ ERROR_RESPONSES = {
     401: {"model": ErrorResponse},
     403: {"model": ErrorResponse},
     404: {"model": ErrorResponse},
+    409: {"model": ErrorResponse},
     422: {"model": ErrorResponse},
     500: {"model": ErrorResponse},
 }
@@ -110,46 +110,42 @@ async def list_biblioteca(
 
 @router.post(
     "/",
-    response_model=ImagenResponse,
+    response_model=ImagenDetail,
     status_code=status.HTTP_201_CREATED,
-    summary="Subir imagen",
+    summary="Añadir imagen a un color",
     description=(
-        "multipart/form-data con el archivo y los datos de la imagen. Se sube a "
-        "Cloudinary y se guarda su URL segura. No se admiten SVG ni archivos de "
-        "más de 5 MB."
+        "Asocia a un color existente una imagen ya subida con POST "
+        "/imagenes/uploads: se envía su url, no el archivo. La url debe ser una "
+        "subida del proyecto que no esté asociada a otra imagen (409). Al "
+        "guardarse, la imagen se mueve en Cloudinary a la carpeta de su color; su "
+        "url no cambia."
     ),
-    responses=_error_responses(400, 401, 403, 422, 500),
+    responses=_error_responses(401, 403, 409, 422, 500),
 )
 async def create_imagen(
-    file: Annotated[UploadFile, File(description="Archivo de imagen.")],
-    producto_color_id: Annotated[UUID, Form()],
+    data: ImagenCreate,
     current_user: Annotated[
         CurrentUser,
         Depends(require_permission(Module.IMAGEN, Action.CREATE)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
-    tipo: Annotated[TipoImagen, Form()] = TipoImagen.MODELO,
-) -> ImagenResponse:
-    return await ImagenService.create(
-        db_session,
-        ImagenCreate(producto_color_id=producto_color_id, tipo=tipo),
-        file,
-        current_user.id,
-        settings,
-    )
+) -> ImagenDetail:
+    return await ImagenService.create(db_session, data, current_user.id, settings)
 
 
 @router.post(
     "/uploads",
     response_model=ImagenUploadResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Subir imagen antes de crear el producto",
+    summary="Subir el archivo de una imagen",
     description=(
-        "multipart/form-data con el archivo. Lo sube a Cloudinary y devuelve su "
-        "URL sin crear ningún registro, para usarla después en el create del "
-        "producto dentro del color correspondiente. Las URLs que no se usen se "
-        "consideran huérfanas. No se admiten SVG ni archivos de más de 5 MB."
+        "multipart/form-data con el archivo. Es el único endpoint que recibe "
+        "archivos de imágenes de producto: lo sube a Cloudinary, en la carpeta "
+        "de pendientes, y devuelve su url sin crear ningún registro. La url se "
+        "envía después en POST /productos/, POST /producto-colores/ o POST "
+        "/imagenes/, que la asocian a su color. Las que no se usen se consideran "
+        "huérfanas. No se admiten SVG ni archivos de más de 5 MB."
     ),
     responses=_error_responses(400, 401, 403, 422, 500),
 )
@@ -201,7 +197,7 @@ async def get_imagen_audit(
 
 @router.patch(
     "/{imagen_id}",
-    response_model=ImagenResponse,
+    response_model=ImagenDetail,
     summary="Cambiar el tipo de una imagen",
     description="Solo se puede cambiar el tipo. Para cambiar la foto, elimínala y sube otra.",
     responses=_error_responses(401, 403, 404, 422, 500),
@@ -214,7 +210,7 @@ async def update_imagen(
         Depends(require_permission(Module.IMAGEN, Action.UPDATE)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
-) -> ImagenResponse:
+) -> ImagenDetail:
     return await ImagenService.update(db_session, imagen_id, data, current_user.id)
 
 

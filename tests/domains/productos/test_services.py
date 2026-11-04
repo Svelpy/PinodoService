@@ -76,14 +76,20 @@ async def test_update_aplica_cambios_y_null_explicito() -> None:
     producto = _producto()
     actor_id = uuid4()
 
-    with patch.object(ProductoService, "get", new=AsyncMock(return_value=producto)):
+    with (
+        patch.object(ProductoService, "get", new=AsyncMock(return_value=producto)),
+        patch.object(ProductoService, "get_detail", new=AsyncMock(return_value=producto)) as detail,
+    ):
         result = await ProductoService.update(
             _session(),
             producto.id,
             ProductoUpdate(nombre="Camisa Oxford slim", cuidados=None),
             actor_id,
+            MagicMock(),
         )
 
+    # Responde la ficha completa, igual que GET /productos/{id}.
+    detail.assert_awaited_once_with(ANY, producto.id, ANY)
     assert result.nombre == "Camisa Oxford slim"
     assert result.cuidados is None
     assert result.updated_by == actor_id
@@ -96,12 +102,14 @@ async def test_update_misma_seccion_no_toca_las_categorias() -> None:
     with (
         patch.object(ProductoService, "get", new=AsyncMock(return_value=producto)),
         patch.object(CategoriaProductoRepository, "soft_delete_by_producto", new=AsyncMock()) as quitar,
+        patch.object(ProductoService, "get_detail", new=AsyncMock(return_value=producto)),
     ):
         await ProductoService.update(
             _session(),
             producto.id,
             ProductoUpdate(seccion_id=producto.seccion_id),
             uuid4(),
+            MagicMock(),
         )
 
     quitar.assert_not_awaited()
@@ -124,9 +132,10 @@ async def test_update_cambio_de_seccion_quita_las_categorias_en_la_misma_transac
         patch.object(
             CategoriaProductoRepository, "soft_delete_by_producto", new=AsyncMock(return_value=3)
         ) as quitar,
+        patch.object(ProductoService, "get_detail", new=AsyncMock(return_value=producto)),
     ):
         result = await ProductoService.update(
-            session, producto.id, ProductoUpdate(seccion_id=destino), actor_id
+            session, producto.id, ProductoUpdate(seccion_id=destino), actor_id, MagicMock()
         )
 
     assert result.seccion_id == destino
@@ -146,7 +155,7 @@ async def test_update_cambio_a_seccion_inexistente_no_quita_categorias() -> None
     ):
         with pytest.raises(AppException) as error:
             await ProductoService.update(
-                _session(), producto.id, ProductoUpdate(seccion_id=uuid4()), uuid4()
+                _session(), producto.id, ProductoUpdate(seccion_id=uuid4()), uuid4(), MagicMock()
             )
 
     assert error.value.status_code == 422
@@ -222,7 +231,7 @@ from app.domains.skus.services import SkuService  # noqa: E402
 from app.integrations.cloudinary import CloudinaryService  # noqa: E402
 
 
-PENDIENTE = "https://res.cloudinary.com/demo/image/upload/v1/pinodo/pendientes/{}.jpg"
+PENDIENTE = "https://res.cloudinary.com/demo/image/upload/v1/pinodo/imagenes/{}.jpg"
 
 
 def _settings() -> MagicMock:
@@ -274,6 +283,7 @@ class _Arbol:
             "imagen_add": patch.object(ImagenRepository, "add"),
             "sku_add": patch.object(SkuRepository, "add"),
             "confirm": patch.object(CloudinaryService, "confirm_pending_uploads", new=AsyncMock()),
+            "url_libre": patch.object(ImagenRepository, "get_active_by_url", new=AsyncMock(return_value=None)),
             "get": patch.object(ProductoService, "get_detail", new=AsyncMock(return_value="detail")),
         }
         self.mocks = {name: p.start() for name, p in self.patches.items()}
@@ -313,7 +323,9 @@ async def test_create_arbol_crea_todo_enlazado_y_con_auditoria() -> None:
         assert registro.created_by == actor_id and registro.updated_by == actor_id
 
     session.commit.assert_awaited_once()
-    arbol.mocks["confirm"].assert_awaited_once_with([PENDIENTE.format("azul1")])
+    # La foto se mueve a la carpeta de su producto y del color al que pertenece.
+    destino = f"productos/{producto.id}/{colores[0].id}"
+    assert arbol.mocks["confirm"].await_args.args[0] == {PENDIENTE.format("azul1"): destino}
     arbol.mocks["get"].assert_awaited_once_with(session, producto.id, ANY)
     assert result == "detail"
 

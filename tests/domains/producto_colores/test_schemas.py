@@ -69,3 +69,26 @@ def test_producto_color_detail_embebe_hijos_hasta_las_hojas() -> None:
     assert data["skus"][0]["talla"]["etiqueta"] == "M"
     assert data["skus"][0]["precio"]["normal"] == 29.95
     assert "producto_color" not in data["skus"][0]
+
+
+def test_producto_color_create_hereda_el_arbol_y_exige_el_producto() -> None:
+    from app.domains.producto_colores.schemas import ProductoColorCreate
+
+    example = ProductoColorCreate.model_config["json_schema_extra"]["example"]
+    ProductoColorCreate.model_validate(example)
+    assert list(example) == list(ProductoColorCreate.model_fields)
+
+    minimo = ProductoColorCreate.model_validate({"producto_id": str(uuid4()), "color_id": str(uuid4())})
+    assert (minimo.imagenes, minimo.skus) == ([], [])
+    with pytest.raises(ValidationError):
+        ProductoColorCreate.model_validate({"color_id": str(uuid4())})
+
+
+def test_producto_color_rechaza_codigo_de_barras_repetido() -> None:
+    from app.domains.producto_colores.schemas import ProductoColorDetailCreate
+
+    sku = {"precio": {"normal": 10}, "codigo_barras": "841"}
+    with pytest.raises(ValidationError, match="código de barras no puede repetirse"):
+        ProductoColorDetailCreate.model_validate(
+            {"color_id": str(uuid4()), "skus": [{**sku, "talla_id": str(uuid4())}, {**sku, "talla_id": str(uuid4())}]}
+        )

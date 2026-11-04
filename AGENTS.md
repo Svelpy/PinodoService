@@ -548,17 +548,26 @@ DELETE /{id}
 
 `GET /` devuelve paginación por defecto.
 
-Schema de respuesta de cada endpoint de lectura:
+Schema de respuesta de cada endpoint:
 
 ```text
                   dominio sin foreign keys        dominio con foreign keys
 GET /             PaginatedResponse[Response]     PaginatedResponse[ListItem]
 GET /{id}         Response                        Detail
 GET /{id}/audit   ResponseAudit                   ResponseAudit
+POST /            Response                        Detail
+PATCH /{id}       Response                        Detail
 ```
 
 `ListItem` y `Detail` contienen todos los campos de `Response`, por lo que lo
 sustituyen sin necesidad de endpoints adicionales.
+
+`POST /` y `PATCH /{id}` responden lo mismo que `GET /{id}`, para que el
+cliente reciba el registro creado o actualizado sin otra consulta. El service
+lo recarga con su `Detail` después del commit; en un `PATCH`, también cuando no
+hay cambios. Las operaciones que no crean ni modifican un recurso por su id,
+como subir un archivo, emitir tokens o reemplazar un enlace N:M, conservan su
+propia respuesta.
 
 `GET /{id}/audit` expone los campos de auditoría autorizados. Cuando
 `GET /{id}` y `GET /{id}/audit` recuperan el mismo registro y aplican las

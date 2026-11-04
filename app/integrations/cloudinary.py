@@ -13,8 +13,13 @@ from app.shared.errors.codes import ErrorCode
 logger = get_logger(__name__)
 MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5 MB
 
-# Subidas previas a crear su registro: viven en esta subcarpeta y con esta
-# etiqueta hasta que un create las asocia, lo que permite limpiar las huérfanas.
+# Imágenes subidas antes de crear su registro (POST /imagenes/uploads).
+# La cuenta usa carpetas dinámicas: la carpeta (asset_folder) es independiente
+# de la URL. Por eso la URL lleva un prefijo neutro que no cambia nunca, y la
+# imagen vive en la carpeta y con la etiqueta de pendiente hasta que un create la
+# asocia; entonces se mueve a la carpeta de su dueño y pierde la etiqueta, lo que
+# permite limpiar las huérfanas.
+UPLOADS_PREFIX = "imagenes"
 PENDING_FOLDER = "pendientes"
 PENDING_TAG = "pendiente"
 
@@ -51,18 +56,21 @@ class CloudinaryService:
             raise AppException("No se pudo extraer el identificador de la imagen", 400)
     
     @staticmethod
-    def is_pending_upload_url(url: str, settings: Settings) -> bool:
+    def is_uploaded_image_url(url: str, settings: Settings) -> bool:
         """
         True si la URL es exactamente una de las que devuelve upload_pending:
-        HTTPS, de la cuenta configurada (cloud_name), dentro de la carpeta de
-        pendientes del proyecto y sin transformaciones ni parámetros añadidos.
+        HTTPS, de la cuenta configurada (cloud_name), con el prefijo de subidas
+        del proyecto y sin transformaciones ni parámetros añadidos.
+
+        Prueba el origen, no que siga pendiente: que no esté ya asociada a otro
+        registro lo comprueba el service en la base de datos.
         """
         if not isinstance(url, str) or not settings.CLOUDINARY_CLOUD_NAME:
             return False
         pattern = (
             rf"https://res\.cloudinary\.com/{re.escape(settings.CLOUDINARY_CLOUD_NAME)}"
             rf"/image/upload/v\d+/{re.escape(settings.CLOUDINARY_FOLDER_NAME or '')}"
-            rf"/{PENDING_FOLDER}/[A-Za-z0-9_-]+\.[A-Za-z0-9]+"
+            rf"/{UPLOADS_PREFIX}/[A-Za-z0-9_-]+\.[A-Za-z0-9]+"
         )
         return re.fullmatch(pattern, url) is not None
 
@@ -74,6 +82,7 @@ class CloudinaryService:
             PENDING_FOLDER,
             settings,
             tags=[PENDING_TAG],
+            public_id_prefix=UPLOADS_PREFIX,
         )
 
     @staticmethod
@@ -83,6 +92,7 @@ class CloudinaryService:
         settings: Settings,
         *,
         tags: list[str] | None = None,
+        public_id_prefix: str | None = None,
     ) -> dict[str, str]:
         """
         Sube una imagen a Cloudinary.
@@ -105,13 +115,24 @@ class CloudinaryService:
             if len(content) > MAX_IMAGE_SIZE:
                 raise AppException("La imagen no puede pesar más de 5MB", 400, code=ErrorCode.INVALID_IMAGE)
             cloudinary_folder= f"{settings.CLOUDINARY_FOLDER_NAME}/{folder}"
+            # Sin public_id_prefix, la carpeta también forma parte de la URL. Con
+            # él, la URL usa ese prefijo y la imagen puede cambiar de carpeta
+            # después sin que cambie su URL.
+            location = (
+                {
+                    "asset_folder": cloudinary_folder,
+                    "public_id_prefix": f"{settings.CLOUDINARY_FOLDER_NAME}/{public_id_prefix}",
+                }
+                if public_id_prefix
+                else {"folder": cloudinary_folder}
+            )
             # El SDK de Cloudinary es síncrono.
             response = await asyncio.to_thread(
                 cloudinary.uploader.upload,
-                content, 
-                folder=cloudinary_folder,
+                content,
                 resource_type="image",
                 tags=tags or [],
+                **location,
             )
 
             secure_url = response.get("secure_url")
@@ -144,20 +165,39 @@ class CloudinaryService:
         return response.get("result") == "ok"
 
     @staticmethod
-    async def confirm_pending_uploads(image_urls: list[str]) -> None:
+    async def confirm_pending_uploads(destinations: dict[str, str], settings: Settings) -> None:
         """
-        Quita la etiqueta de pendiente a imágenes que ya quedaron asociadas a un
-        registro, para que la limpieza de huérfanas no las elimine.
+        Confirma imágenes que ya quedaron asociadas a un registro: mueve cada una
+        de la carpeta de pendientes a la de su dueño (destinations: url →
+        carpeta relativa a la del proyecto) y les quita la etiqueta de
+        pendiente, para que la limpieza de huérfanas no las elimine.
 
-        No interrumpe la operación principal: si falla, solo se registra.
+        Usa la API de subida (explicit y remove_tag), no la de administración, y
+        la URL no cambia. No interrumpe la operación principal: si falla, solo
+        se registra, y la imagen sigue funcionando desde su carpeta anterior.
         """
-        if not image_urls:
+        if not destinations:
             return
         try:
-            public_ids = [CloudinaryService._extract_public_id(url) for url in image_urls]
-            await asyncio.to_thread(cloudinary.uploader.remove_tag, PENDING_TAG, public_ids)
+            public_ids = {url: CloudinaryService._extract_public_id(url) for url in destinations}
+            await asyncio.gather(
+                *(
+                    asyncio.to_thread(
+                        cloudinary.uploader.explicit,
+                        public_ids[url],
+                        type="upload",
+                        asset_folder=f"{settings.CLOUDINARY_FOLDER_NAME}/{folder}",
+                    )
+                    for url, folder in destinations.items()
+                )
+            )
+            await asyncio.to_thread(
+                cloudinary.uploader.remove_tag, PENDING_TAG, list(public_ids.values())
+            )
         except Exception:
-            logger.exception("No se pudo confirmar imágenes pendientes en Cloudinary: %s", image_urls)
+            logger.exception(
+                "No se pudo confirmar imágenes pendientes en Cloudinary: %s", list(destinations)
+            )
 
     @staticmethod
     async def safe_delete_image(image_url: str) -> bool:

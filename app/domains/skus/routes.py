@@ -13,7 +13,6 @@ from app.domains.skus.schemas import (
     SkuDetail,
     SkuInventarioItem,
     SkuListItem,
-    SkuResponse,
     SkuResponseAudit,
     SkuUpdate,
 )
@@ -75,7 +74,7 @@ async def list_skus(
 
 @router.post(
     "/",
-    response_model=SkuResponse,
+    response_model=SkuDetail,
     status_code=status.HTTP_201_CREATED,
     summary="Crear SKU",
     description=(
@@ -91,7 +90,7 @@ async def create_sku(
         Depends(require_permission(Module.SKU, Action.CREATE)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
-) -> SkuResponse:
+) -> SkuDetail:
     return await SkuService.create(db_session, data, current_user.id)
 
 
@@ -183,7 +182,7 @@ async def get_sku_audit(
 
 @router.patch(
     "/{sku_id}",
-    response_model=SkuResponse,
+    response_model=SkuDetail,
     summary="Actualizar SKU",
     description=(
         "Solo cambia lo enviado, también dentro de precio y stock: por ejemplo, "
@@ -203,7 +202,7 @@ async def update_sku(
         Depends(require_permission(Module.SKU, Action.UPDATE)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
-) -> SkuResponse:
+) -> SkuDetail:
     return await SkuService.update(db_session, sku_id, data, current_user.id)
 
 

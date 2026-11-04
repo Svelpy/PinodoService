@@ -34,95 +34,106 @@ def _imagen() -> Imagen:
     return Imagen(producto_color_id=uuid4(), url=URL)
 
 
+SUBIDA = "https://res.cloudinary.com/demo/image/upload/v1/pinodo/imagenes/foto.jpg"
+
+
+def _settings() -> MagicMock:
+    return MagicMock(CLOUDINARY_CLOUD_NAME="demo", CLOUDINARY_FOLDER_NAME="pinodo")
+
+
 @pytest.mark.asyncio
-async def test_create_sube_a_la_carpeta_del_producto_y_guarda_la_url() -> None:
+async def test_create_asocia_la_subida_y_la_mueve_a_la_carpeta_del_color() -> None:
     producto_color = _producto_color()
     session = _session()
     actor_id = uuid4()
-    file = MagicMock()
+    settings = _settings()
 
     with (
-        patch.object(
-            ProductoColorRepository,
-            "get_by_id",
-            new=AsyncMock(return_value=producto_color),
-        ),
-        patch.object(
-            CloudinaryService,
-            "upload_image",
-            new=AsyncMock(return_value={"url": URL, "public_id": "x"}),
-        ) as upload,
+        patch.object(ProductoColorRepository, "get_by_id", new=AsyncMock(return_value=producto_color)),
+        patch.object(ImagenRepository, "get_active_by_url", new=AsyncMock(return_value=None)),
         patch.object(ImagenRepository, "add") as add,
+        patch.object(CloudinaryService, "upload_image", new=AsyncMock()) as upload,
+        patch.object(CloudinaryService, "confirm_pending_uploads", new=AsyncMock()) as confirm,
     ):
         imagen = await ImagenService.create(
             session,
-            ImagenCreate(producto_color_id=producto_color.id, tipo=TipoImagen.PRENDA),
-            file,
+            ImagenCreate(producto_color_id=producto_color.id, url=SUBIDA, tipo=TipoImagen.PRENDA),
             actor_id,
-            get_settings(),
+            settings,
         )
 
-    assert upload.await_args.args[0] is file
-    assert upload.await_args.args[1] == (
-        f"productos/{producto_color.producto_id}/{producto_color.id}"
-    )
-    assert imagen.url == URL
-    assert imagen.tipo is TipoImagen.PRENDA
-    assert imagen.created_by == actor_id
+    assert (imagen.url, imagen.tipo, imagen.created_by) == (SUBIDA, TipoImagen.PRENDA, actor_id)
     add.assert_called_once_with(imagen)
     session.commit.assert_awaited_once()
+    upload.assert_not_awaited()  # ya no sube archivos
+    confirm.assert_awaited_once_with(
+        {SUBIDA: f"productos/{producto_color.producto_id}/{producto_color.id}"}, settings
+    )
 
 
 @pytest.mark.asyncio
-async def test_create_no_sube_nada_si_el_color_no_existe() -> None:
-    with (
-        patch.object(ProductoColorRepository, "get_by_id", new=AsyncMock(return_value=None)),
-        patch.object(CloudinaryService, "upload_image", new=AsyncMock()) as upload,
-    ):
+async def test_create_rechaza_color_inexistente() -> None:
+    with patch.object(ProductoColorRepository, "get_by_id", new=AsyncMock(return_value=None)):
         with pytest.raises(AppException) as error:
             await ImagenService.create(
-                _session(),
-                ImagenCreate(producto_color_id=uuid4()),
-                MagicMock(),
-                uuid4(),
-                get_settings(),
+                _session(), ImagenCreate(producto_color_id=uuid4(), url=SUBIDA), uuid4(), _settings()
             )
 
     assert error.value.status_code == 422
     assert "producto_color_id" in error.value.details
-    upload.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_create_borra_el_archivo_subido_si_falla_el_registro() -> None:
+async def test_create_rechaza_url_que_no_viene_de_uploads() -> None:
+    otra = "https://res.cloudinary.com/otra/image/upload/v1/pinodo/imagenes/foto.jpg"
+
+    with patch.object(
+        ProductoColorRepository, "get_by_id", new=AsyncMock(return_value=_producto_color())
+    ):
+        with pytest.raises(AppException) as error:
+            await ImagenService.create(
+                _session(), ImagenCreate(producto_color_id=uuid4(), url=otra), uuid4(), _settings()
+            )
+
+    assert (error.value.status_code, list(error.value.details)) == (422, ["url"])
+
+
+@pytest.mark.asyncio
+async def test_create_rechaza_url_ya_asociada_sin_guardar_ni_mover() -> None:
+    session = _session()
+
+    with (
+        patch.object(ProductoColorRepository, "get_by_id", new=AsyncMock(return_value=_producto_color())),
+        patch.object(ImagenRepository, "get_active_by_url", new=AsyncMock(return_value=_imagen())),
+        patch.object(CloudinaryService, "confirm_pending_uploads", new=AsyncMock()) as confirm,
+    ):
+        with pytest.raises(AppException) as error:
+            await ImagenService.create(
+                session, ImagenCreate(producto_color_id=uuid4(), url=SUBIDA), uuid4(), _settings()
+            )
+
+    assert error.value.status_code == 409
+    session.commit.assert_not_awaited()
+    confirm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_no_mueve_la_imagen_si_falla_el_commit() -> None:
     session = _session()
     session.commit = AsyncMock(side_effect=RuntimeError("fallo de base de datos"))
 
     with (
-        patch.object(
-            ProductoColorRepository,
-            "get_by_id",
-            new=AsyncMock(return_value=_producto_color()),
-        ),
-        patch.object(
-            CloudinaryService,
-            "upload_image",
-            new=AsyncMock(return_value={"url": URL, "public_id": "x"}),
-        ),
-        patch.object(CloudinaryService, "safe_delete_image", new=AsyncMock()) as safe_delete,
+        patch.object(ProductoColorRepository, "get_by_id", new=AsyncMock(return_value=_producto_color())),
+        patch.object(ImagenRepository, "get_active_by_url", new=AsyncMock(return_value=None)),
         patch.object(ImagenRepository, "add"),
+        patch.object(CloudinaryService, "confirm_pending_uploads", new=AsyncMock()) as confirm,
     ):
         with pytest.raises(RuntimeError):
             await ImagenService.create(
-                session,
-                ImagenCreate(producto_color_id=uuid4()),
-                MagicMock(),
-                uuid4(),
-                get_settings(),
+                session, ImagenCreate(producto_color_id=uuid4(), url=SUBIDA), uuid4(), _settings()
             )
 
-    safe_delete.assert_awaited_once_with(URL)
-    session.rollback.assert_awaited_once()
+    confirm.assert_not_awaited()
 
 
 @pytest.mark.asyncio

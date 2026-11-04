@@ -95,6 +95,9 @@ class ProductoDetailCreate(ProductoCreate):
         ]
         if len(codigos) != len(set(codigos)):
             raise ValueError("Un código de barras no puede repetirse dentro del mismo producto.")
+        urls = [imagen.url for color in value for imagen in color.imagenes]
+        if len(urls) != len(set(urls)):
+            raise ValueError("Una imagen no puede repetirse dentro del mismo producto.")
         return value
 
     model_config = ConfigDict(

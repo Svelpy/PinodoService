@@ -52,12 +52,20 @@ async def test_create_valida_referencias_y_asigna_auditoria() -> None:
             new=AsyncMock(return_value=None),
         ),
         patch.object(ProductoColorRepository, "add") as add,
+        patch.object(
+            ProductoColorService,
+            "get",
+            new=AsyncMock(side_effect=lambda *a, **k: add.call_args.args[0]),
+        ) as get,
     ):
         producto_color = await ProductoColorService.create(
             session,
             ProductoColorCreate(producto_id=producto.id, color_id=color.id),
             actor_id,
+            MagicMock(),
         )
+
+    get.assert_awaited_once_with(session, producto_color.id, load_detail=True)
 
     assert producto_color.producto_id == producto.id
     assert producto_color.is_visible is True
@@ -87,12 +95,18 @@ async def test_create_rechaza_referencias_inexistentes(
             "get_by_id",
             new=AsyncMock(return_value=_color() if color_existe else None),
         ),
+        patch.object(
+            ProductoColorRepository,
+            "get_active_by_producto_and_color",
+            new=AsyncMock(return_value=None),
+        ),
     ):
         with pytest.raises(AppException) as error:
             await ProductoColorService.create(
                 _session(),
                 ProductoColorCreate(producto_id=uuid4(), color_id=uuid4()),
                 uuid4(),
+                MagicMock(),
             )
 
     assert error.value.status_code == 422
@@ -117,6 +131,7 @@ async def test_create_rechaza_color_repetido_en_el_producto() -> None:
                 session,
                 ProductoColorCreate(producto_id=uuid4(), color_id=uuid4()),
                 uuid4(),
+                MagicMock(),
             )
 
     assert error.value.status_code == 409
@@ -233,3 +248,120 @@ async def test_get_inexistente_responde_404() -> None:
             await ProductoColorService.get(_session(), uuid4())
 
     assert error.value.status_code == 404
+
+
+# --- Create con imágenes y SKUs ---------------------------------------------
+
+from app.domains.skus.services import SkuService  # noqa: E402
+from app.integrations.cloudinary import CloudinaryService  # noqa: E402
+
+PENDIENTE = "https://res.cloudinary.com/demo/image/upload/v1/pinodo/imagenes/{}.jpg"
+
+
+def _settings() -> MagicMock:
+    return MagicMock(CLOUDINARY_CLOUD_NAME="demo", CLOUDINARY_FOLDER_NAME="pinodo")
+
+
+def _arbol(**overrides: object) -> ProductoColorCreate:
+    return ProductoColorCreate.model_validate(
+        {
+            "producto_id": str(uuid4()),
+            "color_id": str(uuid4()),
+            "imagenes": [{"url": PENDIENTE.format("rojo1"), "tipo": "MODELO"}],
+            "skus": [
+                {"talla_id": str(uuid4()), "codigo_barras": "841", "precio": {"normal": 29.95}},
+                {"talla_id": str(uuid4()), "precio": {"normal": 29.95}, "stock": {"cantidad": 4}},
+            ],
+            **overrides,
+        }
+    )
+
+
+class _Arbol:
+    def __enter__(self) -> "_Arbol":
+        self.patches = {
+            "producto": patch.object(ProductoRepository, "get_by_id", new=AsyncMock(return_value=_producto())),
+            "unico": patch.object(ProductoColorRepository, "get_active_by_producto_and_color", new=AsyncMock(return_value=None)),
+            "color": patch.object(ProductoColorService, "validate_color", new=AsyncMock()),
+            "talla": patch.object(SkuService, "validate_talla", new=AsyncMock()),
+            "codigo": patch.object(SkuService, "validate_unique_codigo_barras", new=AsyncMock()),
+            "color_add": patch.object(ProductoColorRepository, "add"),
+            "imagen_add": patch.object(ImagenRepository, "add"),
+            "sku_add": patch.object(SkuRepository, "add"),
+            "confirm": patch.object(CloudinaryService, "confirm_pending_uploads", new=AsyncMock()),
+            "url_libre": patch.object(ImagenRepository, "get_active_by_url", new=AsyncMock(return_value=None)),
+            "get": patch.object(ProductoColorService, "get", new=AsyncMock(return_value="detail")),
+        }
+        self.mocks = {name: p.start() for name, p in self.patches.items()}
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        for p in self.patches.values():
+            p.stop()
+
+    def added(self, name: str) -> list[object]:
+        return [c.args[0] for c in self.mocks[name].call_args_list]
+
+
+@pytest.mark.asyncio
+async def test_create_con_hijos_los_enlaza_al_color_en_una_transaccion() -> None:
+    session = _session()
+    actor_id = uuid4()
+    data = _arbol()
+
+    with _Arbol() as arbol:
+        result = await ProductoColorService.create(session, data, actor_id, _settings())
+
+    [color] = arbol.added("color_add")
+    [imagen] = arbol.added("imagen_add")
+    skus = arbol.added("sku_add")
+    assert color.producto_id == data.producto_id
+    assert imagen.producto_color_id == color.id
+    assert [s.producto_color_id for s in skus] == [color.id, color.id]
+    assert skus[1].stock["cantidad"] == 4
+    for registro in [color, imagen, *skus]:
+        assert registro.created_by == actor_id
+    session.commit.assert_awaited_once()
+    # La foto se mueve a la carpeta de su producto y color.
+    destino = f"productos/{data.producto_id}/{color.id}"
+    assert arbol.mocks["confirm"].await_args.args[0] == {PENDIENTE.format("rojo1"): destino}
+    assert result == "detail"
+
+
+@pytest.mark.asyncio
+async def test_create_color_repetido_responde_409_sin_validar_los_hijos() -> None:
+    with _Arbol() as arbol:
+        arbol.mocks["unico"].return_value = _producto_color()
+        with pytest.raises(AppException) as error:
+            await ProductoColorService.create(_session(), _arbol(), uuid4(), _settings())
+
+    assert error.value.status_code == 409
+    arbol.mocks["talla"].assert_not_awaited()
+    arbol.mocks["color_add"].assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_indica_la_ruta_del_error_sin_prefijo() -> None:
+    session = _session()
+    error_talla = AppException("La talla no existe.", 422, details={"talla_id": "La talla no existe."})
+
+    with _Arbol() as arbol:
+        arbol.mocks["talla"].side_effect = [None, error_talla]
+        with pytest.raises(AppException) as error:
+            await ProductoColorService.create(session, _arbol(), uuid4(), _settings())
+
+    assert error.value.details == {"skus -> 1 -> talla_id": "La talla no existe."}
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_rechaza_imagen_que_no_es_pendiente() -> None:
+    data = _arbol()
+    data.imagenes[0].url = "https://res.cloudinary.com/otra/image/upload/v1/x/pendientes/a.jpg"
+
+    with _Arbol() as arbol:
+        with pytest.raises(AppException) as error:
+            await ProductoColorService.create(_session(), data, uuid4(), _settings())
+
+    assert list(error.value.details) == ["imagenes -> 0 -> url"]
+    arbol.mocks["color_add"].assert_not_called()

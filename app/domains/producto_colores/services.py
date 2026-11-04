@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from datetime import datetime
 from uuid import UUID
 
@@ -6,18 +6,25 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.base_model import utc_now
+from app.core.config import Settings
 from app.core.logging import get_logger
 from app.domains.colores.repositories import ColorRepository
+from app.domains.imagenes.models import Imagen
 from app.domains.imagenes.repositories import ImagenRepository
+from app.domains.imagenes.services import ImagenService
 from app.domains.producto_colores.models import ProductoColor
 from app.domains.producto_colores.repositories import ProductoColorRepository
 from app.domains.producto_colores.schemas import (
     ProductoColorCreate,
+    ProductoColorDetailCreate,
     ProductoColorListItem,
     ProductoColorUpdate,
 )
 from app.domains.productos.repositories import ProductoRepository
+from app.domains.skus.models import Sku
 from app.domains.skus.repositories import SkuRepository
+from app.domains.skus.services import SkuService
+from app.integrations.cloudinary import CloudinaryService
 from app.shared.errors.codes import ErrorCode
 from app.shared.errors.exceptions import AppException
 from app.shared.schemas.pagination import PaginatedResponse
@@ -163,34 +170,144 @@ class ProductoColorService:
             data=producto_colores,
         )
 
+    @staticmethod
+    async def _at(path: str, check: Awaitable[None]) -> None:
+        """Ejecuta una validación e indica en sus detalles la ruta dentro del árbol."""
+        try:
+            await check
+        except AppException as error:
+            if path:
+                error.details = {
+                    f"{path} -> {key}": message for key, message in error.details.items()
+                }
+            raise
+
+    @classmethod
+    async def validate_detail_create(
+        cls,
+        db_session: AsyncSession,
+        data: ProductoColorDetailCreate,
+        settings: Settings,
+        *,
+        path: str = "",
+        valid_talla_ids: set[UUID] | None = None,
+    ) -> None:
+        """
+        Valida un color con sus imágenes y SKUs con las mismas reglas que sus
+        create individuales. La unicidad dentro del árbol ya la garantiza el
+        schema; la del color en un producto existente la valida quien llama.
+
+        path ubica los errores dentro de un árbol mayor (por ejemplo
+        "colores -> 1"); valid_talla_ids evita validar dos veces la misma talla
+        cuando se validan varios colores.
+        """
+        prefix = f"{path} -> " if path else ""
+        valid_talla_ids = set() if valid_talla_ids is None else valid_talla_ids
+
+        await cls._at(path, cls.validate_color(db_session, data.color_id))
+
+        for imagen_index, imagen in enumerate(data.imagenes):
+            await cls._at(
+                f"{prefix}imagenes -> {imagen_index}",
+                ImagenService.validate_upload_url(db_session, imagen.url, settings),
+            )
+
+        sku_repository = SkuRepository(db_session)
+        for sku_index, sku in enumerate(data.skus):
+            sku_path = f"{prefix}skus -> {sku_index}"
+            if sku.talla_id not in valid_talla_ids:
+                await cls._at(sku_path, SkuService.validate_talla(db_session, sku.talla_id))
+                valid_talla_ids.add(sku.talla_id)
+            if sku.codigo_barras is not None:
+                await cls._at(
+                    sku_path,
+                    SkuService.validate_unique_codigo_barras(sku_repository, sku.codigo_barras),
+                )
+
+    @staticmethod
+    def upload_destinations(
+        producto_color: ProductoColor,
+        data: ProductoColorDetailCreate,
+    ) -> dict[str, str]:
+        """Carpeta de Cloudinary a la que se mueve cada imagen del color al confirmarla."""
+        folder = ImagenService.folder_for(producto_color.producto_id, producto_color.id)
+        return {imagen.url: folder for imagen in data.imagenes}
+
+    @staticmethod
+    def add_detail_create(
+        db_session: AsyncSession,
+        producto_id: UUID,
+        data: ProductoColorDetailCreate,
+        actor_id: UUID,
+    ) -> ProductoColor:
+        """Añade a la sesión el color con sus imágenes y SKUs. No hace commit."""
+        audit = {"created_by": actor_id, "updated_by": actor_id}
+        producto_color = ProductoColor(
+            producto_id=producto_id,
+            color_id=data.color_id,
+            is_visible=data.is_visible,
+            **audit,
+        )
+        ProductoColorRepository(db_session).add(producto_color)
+
+        imagen_repository = ImagenRepository(db_session)
+        for imagen in data.imagenes:
+            imagen_repository.add(
+                Imagen(producto_color_id=producto_color.id, **imagen.model_dump(), **audit)
+            )
+
+        sku_repository = SkuRepository(db_session)
+        for sku in data.skus:
+            sku_repository.add(
+                Sku(
+                    producto_color_id=producto_color.id,
+                    **sku.model_dump(exclude={"precio", "stock"}),
+                    precio=SkuService.precio_json(sku.precio),
+                    stock=SkuService.stock_json(sku.stock),
+                    **audit,
+                )
+            )
+        return producto_color
+
     @classmethod
     async def create(
         cls,
         db_session: AsyncSession,
         data: ProductoColorCreate,
         actor_id: UUID,
+        settings: Settings,
     ) -> ProductoColor:
+        """
+        Añade a un producto existente un color con sus imágenes y SKUs, en una
+        sola transacción. Todo se valida antes de insertar nada.
+
+        Devuelve el color con su Detail cargado.
+        """
         if await ProductoRepository(db_session).get_by_id(data.producto_id) is None:
             raise cls._invalid_reference("producto_id", "El producto no existe.")
-        await cls.validate_color(db_session, data.color_id)
-
-        repository = ProductoColorRepository(db_session)
-        await cls._validate_unique_color(repository, data.producto_id, data.color_id)
-
-        producto_color = ProductoColor(
-            **data.model_dump(),
-            created_by=actor_id,
-            updated_by=actor_id,
+        await cls._validate_unique_color(
+            ProductoColorRepository(db_session), data.producto_id, data.color_id
         )
-        repository.add(producto_color)
-        await cls._commit(db_session, producto_color)
+        await cls.validate_detail_create(db_session, data, settings)
+
+        producto_color = cls.add_detail_create(db_session, data.producto_id, data, actor_id)
+        await cls._commit(db_session)
+        await CloudinaryService.confirm_pending_uploads(
+            cls.upload_destinations(producto_color, data), settings
+        )
 
         logger.info(
-            "Color de producto creado: producto_color_id=%s actor_id=%s",
+            "Color de producto creado: producto_color_id=%s imagenes=%s skus=%s actor_id=%s",
             producto_color.id,
+            len(data.imagenes),
+            len(data.skus),
             actor_id,
         )
-        return producto_color
+        # Igual que en el create del producto: se expira para cargar el Detail
+        # completo, tomando antes el id para no disparar una carga implícita.
+        producto_color_id = producto_color.id
+        db_session.expire_all()
+        return await cls.get(db_session, producto_color_id, load_detail=True)
 
     @classmethod
     async def update(
@@ -207,7 +324,7 @@ class ProductoColorService:
         changes = data.model_dump(exclude_unset=True)
         producto_color = await cls.get(db_session, producto_color_id, for_update=bool(changes))
         if not changes:
-            return producto_color
+            return await cls.get(db_session, producto_color_id, load_detail=True)
 
         if changes.get("color_id", producto_color.color_id) != producto_color.color_id:
             await cls.validate_color(db_session, changes["color_id"])
@@ -229,7 +346,10 @@ class ProductoColorService:
             producto_color.id,
             actor_id,
         )
-        return producto_color
+        # Responde lo mismo que GET /{id}: se recarga con su Detail.
+        db_session.expire_all()
+        return await cls.get(db_session, producto_color_id, load_detail=True)
+
 
     @staticmethod
     async def delete_children(

@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.core.database import get_db
 from app.domains.auth.dependencies import require_permission
 from app.domains.auth.schemas import CurrentUser
@@ -11,7 +12,6 @@ from app.domains.producto_colores.schemas import (
     ProductoColorCreate,
     ProductoColorDetail,
     ProductoColorListItem,
-    ProductoColorResponse,
     ProductoColorResponseAudit,
     ProductoColorUpdate,
 )
@@ -68,10 +68,17 @@ async def list_producto_colores(
 
 @router.post(
     "/",
-    response_model=ProductoColorResponse,
+    response_model=ProductoColorDetail,
     status_code=status.HTTP_201_CREATED,
     summary="Añadir color a un producto",
-    description="Un producto no puede tener el mismo color dos veces.",
+    description=(
+        "Añade a un producto existente un color con sus imágenes y SKUs, en la "
+        "misma transacción. Si falla cualquier parte, no se guarda nada. Las "
+        "imágenes se suben antes con POST /imagenes/uploads y aquí se envía su "
+        "url. Sin imagenes ni skus añade solo el color. Un producto no puede "
+        "tener el mismo color dos veces. Responde la ficha del color, igual que "
+        "GET /producto-colores/{id}."
+    ),
     responses=_error_responses(401, 403, 409, 422, 500),
 )
 async def create_producto_color(
@@ -81,8 +88,9 @@ async def create_producto_color(
         Depends(require_permission(Module.PRODUCTO_COLOR, Action.CREATE)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
-) -> ProductoColorResponse:
-    return await ProductoColorService.create(db_session, data, current_user.id)
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ProductoColorDetail:
+    return await ProductoColorService.create(db_session, data, current_user.id, settings)
 
 
 @router.get(
@@ -125,7 +133,7 @@ async def get_producto_color_audit(
 
 @router.patch(
     "/{producto_color_id}",
-    response_model=ProductoColorResponse,
+    response_model=ProductoColorDetail,
     summary="Actualizar color de producto",
     description=(
         "Permite corregir el color (conserva sus imágenes y SKUs) o cambiar su "
@@ -141,7 +149,7 @@ async def update_producto_color(
         Depends(require_permission(Module.PRODUCTO_COLOR, Action.UPDATE)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
-) -> ProductoColorResponse:
+) -> ProductoColorDetail:
     return await ProductoColorService.update(
         db_session,
         producto_color_id,

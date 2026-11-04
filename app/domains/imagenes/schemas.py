@@ -7,41 +7,14 @@ from app.shared.enums import TipoImagen
 from app.shared.services.validators import validator_http_url
 
 
-class ImagenCreate(BaseModel):
-    """
-    Datos que acompañan al archivo subido.
-
-    La url no se recibe: el service la asigna tras subir el archivo a Cloudinary.
-    """
-
-    producto_color_id: UUID = Field(...)
-    tipo: TipoImagen = Field(default=TipoImagen.MODELO)
-
-    @field_validator("tipo")
-    @classmethod
-    def validate_tipo(cls, value: TipoImagen | None) -> TipoImagen:
-        if value is None:
-            raise ValueError("El tipo de imagen no puede ser null.")
-        return value
-
-    model_config = ConfigDict(
-        extra="forbid",
-        json_schema_extra={
-            "example": {
-                "producto_color_id": "88888888-8888-4888-8888-888888888888",
-                "tipo": "MODELO",
-            }
-        },
-    )
-
-
 class ImagenDetailCreate(BaseModel):
     """
-    Imagen dentro de ProductoColorDetailCreate (create en un solo paso).
+    Imagen ya subida con POST /imagenes/uploads, para asociarla a un color.
 
-    No lleva producto_color_id: lo asigna el service al crear su color. La url
-    es la que devolvió POST /imagenes/uploads; el service comprueba que sea una
-    subida pendiente de la cuenta de Cloudinary del proyecto.
+    Se usa dentro de ProductoColorDetailCreate, sin producto_color_id porque lo
+    asigna el service al crear el color, y como base de ImagenCreate. El
+    service comprueba que la url sea una subida del proyecto y que no esté ya
+    asociada a otra imagen.
     """
 
     url: str = Field(..., min_length=1, max_length=500)
@@ -67,9 +40,28 @@ class ImagenDetailCreate(BaseModel):
             "example": {
                 "url": (
                     "https://res.cloudinary.com/demo/image/upload/v1730700000/"
-                    "pinodo/pendientes/k3j9x2camisa.jpg"
+                    "pinodo/imagenes/k3j9x2camisa.jpg"
                 ),
                 "tipo": "MODELO",
+            }
+        },
+    )
+
+
+class ImagenCreate(ImagenDetailCreate):
+    """
+    Entrada de POST /imagenes/: asocia a un color existente una imagen ya
+    subida con POST /imagenes/uploads.
+    """
+
+    producto_color_id: UUID = Field(...)
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                **ImagenDetailCreate.model_config["json_schema_extra"]["example"],
+                "producto_color_id": "88888888-8888-4888-8888-888888888888",
             }
         },
     )
@@ -90,7 +82,7 @@ class ImagenUploadResponse(BaseModel):
             "example": {
                 "url": (
                     "https://res.cloudinary.com/demo/image/upload/v1730700000/"
-                    "pinodo/pendientes/k3j9x2camisa.jpg"
+                    "pinodo/imagenes/k3j9x2camisa.jpg"
                 ),
             }
         },

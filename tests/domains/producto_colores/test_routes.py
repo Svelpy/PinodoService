@@ -105,7 +105,7 @@ def test_create_pasa_el_actor_al_service(
     with patch.object(
         ProductoColorService,
         "create",
-        new=AsyncMock(return_value=_producto_color()),
+        new=AsyncMock(return_value=_detail()),
     ) as service:
         response = client.post(
             "/producto-colores/",
@@ -114,7 +114,11 @@ def test_create_pasa_el_actor_al_service(
 
     assert response.status_code == 201
     assert service.await_args.args[0] is db_session
+    assert service.await_args.args[1].imagenes == [] and service.await_args.args[1].skus == []
     assert service.await_args.args[2] == current_user.id
+    # Responde la ficha del color, igual que GET /producto-colores/{id}.
+    assert response.json()["color"]["nombre"] == "Azul"
+    assert "imagenes" in response.json() and "skus" in response.json()
 
 
 def test_patch_rechaza_cambiar_el_producto(

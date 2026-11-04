@@ -12,7 +12,6 @@ from app.domains.categorias.schemas import (
     CategoriaCreate,
     CategoriaDetail,
     CategoriaListItem,
-    CategoriaResponse,
     CategoriaResponseAudit,
     CategoriaUpdate,
 )
@@ -90,7 +89,7 @@ async def get_arbol(
 
 @router.post(
     "/",
-    response_model=CategoriaResponse,
+    response_model=CategoriaDetail,
     status_code=status.HTTP_201_CREATED,
     summary="Crear categoría",
     description=(
@@ -106,7 +105,7 @@ async def create_categoria(
         Depends(require_permission(Module.CATEGORIA, Action.CREATE)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
-) -> CategoriaResponse:
+) -> CategoriaDetail:
     return await CategoriaService.create(db_session, data, current_user.id)
 
 
@@ -147,7 +146,7 @@ async def get_categoria_audit(
 
 @router.patch(
     "/{categoria_id}",
-    response_model=CategoriaResponse,
+    response_model=CategoriaDetail,
     summary="Actualizar categoría",
     description=(
         "Si cambia el nombre o la sección, el slug se regenera. parent_id null la "
@@ -164,7 +163,7 @@ async def update_categoria(
         Depends(require_permission(Module.CATEGORIA, Action.UPDATE)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
-) -> CategoriaResponse:
+) -> CategoriaDetail:
     return await CategoriaService.update(db_session, categoria_id, data, current_user.id)
 
 

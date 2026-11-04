@@ -358,7 +358,11 @@ class SkuService:
         await cls._commit(db_session, sku)
 
         logger.info("SKU creado: sku_id=%s actor_id=%s", sku.id, actor_id)
-        return sku
+        # Responde lo mismo que GET /{id}: se recarga con su Detail, tomando
+        # antes el id para no disparar una carga implícita.
+        sku_id = sku.id
+        db_session.expire_all()
+        return await cls.get(db_session, sku_id, load_detail=True)
 
     @classmethod
     async def update(
@@ -399,7 +403,7 @@ class SkuService:
         if data.stock is not None:
             changes["stock"] = cls.stock_json(cls._merge_stock(sku.stock, data.stock))
         if not changes:
-            return sku
+            return await cls.get(db_session, sku_id, load_detail=True)
 
         for field_name, value in changes.items():
             setattr(sku, field_name, value)
@@ -408,7 +412,10 @@ class SkuService:
         await cls._commit(db_session, sku)
 
         logger.info("SKU actualizado: sku_id=%s actor_id=%s", sku.id, actor_id)
-        return sku
+        # Responde lo mismo que GET /{id}: se recarga con su Detail.
+        db_session.expire_all()
+        return await cls.get(db_session, sku_id, load_detail=True)
+
 
     @classmethod
     async def delete(

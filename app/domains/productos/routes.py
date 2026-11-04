@@ -12,7 +12,6 @@ from app.domains.productos.schemas import (
     ProductoDetail,
     ProductoDetailCreate,
     ProductoListItem,
-    ProductoResponse,
     ProductoResponseAudit,
     ProductoUpdate,
 )
@@ -144,7 +143,7 @@ async def get_producto_audit(
 
 @router.patch(
     "/{producto_id}",
-    response_model=ProductoResponse,
+    response_model=ProductoDetail,
     summary="Actualizar producto",
     description=(
         "Los textos opcionales aceptan null para borrarlos. Cambiar de sección "
@@ -161,8 +160,11 @@ async def update_producto(
         Depends(require_permission(Module.PRODUCTO, Action.UPDATE)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
-) -> ProductoResponse:
-    return await ProductoService.update(db_session, producto_id, data, current_user.id)
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ProductoDetail:
+    return await ProductoService.update(
+        db_session, producto_id, data, current_user.id, settings
+    )
 
 
 @router.delete(

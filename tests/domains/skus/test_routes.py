@@ -104,7 +104,7 @@ def test_create_pasa_el_actor_al_service(
 ) -> None:
     client, current_user, db_session = route_context
 
-    with patch.object(SkuService, "create", new=AsyncMock(return_value=_sku())) as service:
+    with patch.object(SkuService, "create", new=AsyncMock(return_value=_sku_con_talla())) as service:
         response = client.post(
             "/skus/",
             json={

@@ -295,7 +295,11 @@ class CategoriaService:
         await cls._commit(db_session, categoria)
 
         logger.info("Categoría creada: categoria_id=%s actor_id=%s", categoria.id, actor_id)
-        return categoria
+        # Responde lo mismo que GET /{id}: se recarga con su Detail, tomando
+        # antes el id para no disparar una carga implícita.
+        categoria_id = categoria.id
+        db_session.expire_all()
+        return await cls.get(db_session, categoria_id, load_detail=True)
 
     @classmethod
     async def update(
@@ -313,7 +317,7 @@ class CategoriaService:
         changes = data.model_dump(exclude_unset=True)
         categoria = await cls.get(db_session, categoria_id, for_update=bool(changes))
         if not changes:
-            return categoria
+            return await cls.get(db_session, categoria_id, load_detail=True)
 
         repository = CategoriaRepository(db_session)
         target_seccion_id = changes.get("seccion_id", categoria.seccion_id)
@@ -362,7 +366,10 @@ class CategoriaService:
         await cls._commit(db_session, categoria)
 
         logger.info("Categoría actualizada: categoria_id=%s actor_id=%s", categoria.id, actor_id)
-        return categoria
+        # Responde lo mismo que GET /{id}: se recarga con su Detail.
+        db_session.expire_all()
+        return await cls.get(db_session, categoria_id, load_detail=True)
+
 
     @classmethod
     async def delete(

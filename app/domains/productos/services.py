@@ -1,5 +1,4 @@
 from collections import defaultdict
-from collections.abc import Awaitable
 from decimal import Decimal
 from uuid import UUID
 
@@ -12,11 +11,7 @@ from app.core.logging import get_logger
 from app.domains.categoria_productos.models import CategoriaProducto
 from app.domains.categoria_productos.repositories import CategoriaProductoRepository
 from app.domains.categoria_productos.services import CategoriaProductoService
-from app.domains.imagenes.models import Imagen
-from app.domains.imagenes.repositories import ImagenRepository
-from app.domains.producto_colores.models import ProductoColor
 from app.domains.producto_colores.repositories import ProductoColorRepository
-from app.domains.producto_colores.schemas import ProductoColorDetailCreate
 from app.domains.producto_colores.services import ProductoColorService
 from app.domains.productos.models import Producto
 from app.domains.productos.repositories import ProductoRepository
@@ -29,8 +24,6 @@ from app.domains.productos.schemas import (
     ProductoUpdate,
 )
 from app.domains.secciones.repositories import SeccionRepository
-from app.domains.skus.models import Sku
-from app.domains.skus.repositories import SkuRepository
 from app.domains.skus.schemas import SkuPrecio
 from app.domains.skus.services import SkuService
 from app.integrations.cloudinary import CloudinaryService
@@ -218,53 +211,6 @@ class ProductoService:
             ],
         )
 
-    @staticmethod
-    async def _at(path: str, check: Awaitable[None]) -> None:
-        """Ejecuta una validación e indica en sus detalles la ruta dentro del árbol."""
-        try:
-            await check
-        except AppException as error:
-            error.details = {f"{path} -> {key}": message for key, message in error.details.items()}
-            raise
-
-    @classmethod
-    async def _validate_colores(
-        cls,
-        db_session: AsyncSession,
-        colores: list[ProductoColorDetailCreate],
-        settings: Settings,
-    ) -> None:
-        """
-        Aplica a cada color, imagen y SKU las mismas reglas que su create
-        individual. La unicidad dentro del árbol ya la garantiza el schema.
-        """
-        sku_repository = SkuRepository(db_session)
-        valid_talla_ids: set[UUID] = set()
-        for color_index, color in enumerate(colores):
-            color_path = f"colores -> {color_index}"
-            await cls._at(color_path, ProductoColorService.validate_color(db_session, color.color_id))
-
-            for imagen_index, imagen in enumerate(color.imagenes):
-                if not CloudinaryService.is_pending_upload_url(imagen.url, settings):
-                    message = "La imagen debe subirse antes con POST /imagenes/uploads."
-                    raise AppException(
-                        message,
-                        422,
-                        ErrorCode.VALIDATION_ERROR,
-                        {f"{color_path} -> imagenes -> {imagen_index} -> url": message},
-                    )
-
-            for sku_index, sku in enumerate(color.skus):
-                sku_path = f"{color_path} -> skus -> {sku_index}"
-                if sku.talla_id not in valid_talla_ids:
-                    await cls._at(sku_path, SkuService.validate_talla(db_session, sku.talla_id))
-                    valid_talla_ids.add(sku.talla_id)
-                if sku.codigo_barras is not None:
-                    await cls._at(
-                        sku_path,
-                        SkuService.validate_unique_codigo_barras(sku_repository, sku.codigo_barras),
-                    )
-
     @classmethod
     async def create(
         cls,
@@ -284,7 +230,15 @@ class ProductoService:
         await CategoriaProductoService.validate_categorias(
             db_session, data.categoria_ids, data.seccion_id
         )
-        await cls._validate_colores(db_session, data.colores, settings)
+        valid_talla_ids: set[UUID] = set()
+        for color_index, color in enumerate(data.colores):
+            await ProductoColorService.validate_detail_create(
+                db_session,
+                color,
+                settings,
+                path=f"colores -> {color_index}",
+                valid_talla_ids=valid_talla_ids,
+            )
 
         audit = {"created_by": actor_id, "updated_by": actor_id}
         producto = Producto(**data.model_dump(exclude={"categoria_ids", "colores"}), **audit)
@@ -305,36 +259,15 @@ class ProductoService:
                 CategoriaProducto(categoria_id=categoria_id, producto_id=producto.id, **audit)
             )
 
-        producto_color_repository = ProductoColorRepository(db_session)
-        imagen_repository = ImagenRepository(db_session)
-        sku_repository = SkuRepository(db_session)
+        upload_destinations: dict[str, str] = {}
         for color in data.colores:
-            producto_color = ProductoColor(
-                producto_id=producto.id,
-                color_id=color.color_id,
-                is_visible=color.is_visible,
-                **audit,
+            producto_color = ProductoColorService.add_detail_create(
+                db_session, producto.id, color, actor_id
             )
-            producto_color_repository.add(producto_color)
-            for imagen in color.imagenes:
-                imagen_repository.add(
-                    Imagen(producto_color_id=producto_color.id, **imagen.model_dump(), **audit)
-                )
-            for sku in color.skus:
-                sku_repository.add(
-                    Sku(
-                        producto_color_id=producto_color.id,
-                        **sku.model_dump(exclude={"precio", "stock"}),
-                        precio=SkuService.precio_json(sku.precio),
-                        stock=SkuService.stock_json(sku.stock),
-                        **audit,
-                    )
-                )
+            upload_destinations |= ProductoColorService.upload_destinations(producto_color, color)
 
         await cls._commit(db_session)
-        await CloudinaryService.confirm_pending_uploads(
-            [imagen.url for color in data.colores for imagen in color.imagenes]
-        )
+        await CloudinaryService.confirm_pending_uploads(upload_destinations, settings)
 
         logger.info(
             "Producto creado: producto_id=%s colores=%s actor_id=%s",
@@ -356,7 +289,8 @@ class ProductoService:
         producto_id: UUID,
         data: ProductoUpdate,
         actor_id: UUID,
-    ) -> Producto:
+        settings: Settings,
+    ) -> ProductoDetail:
         """
         Actualiza un producto. Al cambiar de sección se quitan todas sus
         categorías, en la misma transacción, porque pertenecen a la sección
@@ -365,7 +299,7 @@ class ProductoService:
         changes = data.model_dump(exclude_unset=True)
         producto = await cls.get(db_session, producto_id, for_update=bool(changes))
         if not changes:
-            return producto
+            return await cls.get_detail(db_session, producto_id, settings)
 
         now = utc_now()
         categorias_quitadas = 0
@@ -387,7 +321,10 @@ class ProductoService:
             categorias_quitadas,
             actor_id,
         )
-        return producto
+        # Responde lo mismo que GET /{id}: se recarga con su Detail.
+        db_session.expire_all()
+        return await cls.get_detail(db_session, producto_id, settings)
+
 
     @classmethod
     async def delete(
