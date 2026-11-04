@@ -57,7 +57,7 @@ async def get_config(
 async def get_config_audit(
     current_user: Annotated[
         CurrentUser,
-        Depends(require_permission(Module.CONFIG, Action.READ)),
+        Depends(require_permission(Module.CONFIG, Action.AUDIT)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ConfigResponseAudit:

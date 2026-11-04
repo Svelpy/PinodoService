@@ -166,7 +166,7 @@ async def get_usuario_audit(
     usuario_id: UUID,
     current_user: Annotated[
         CurrentUser,
-        Depends(require_permission(Module.USUARIO, Action.READ)),
+        Depends(require_permission(Module.USUARIO, Action.AUDIT)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> UsuarioResponseAudit:

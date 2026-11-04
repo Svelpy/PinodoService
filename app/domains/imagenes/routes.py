@@ -128,7 +128,7 @@ async def get_imagen_audit(
     imagen_id: UUID,
     current_user: Annotated[
         CurrentUser,
-        Depends(require_permission(Module.IMAGEN, Action.READ)),
+        Depends(require_permission(Module.IMAGEN, Action.AUDIT)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ImagenResponseAudit:

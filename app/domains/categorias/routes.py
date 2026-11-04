@@ -138,7 +138,7 @@ async def get_categoria_audit(
     categoria_id: UUID,
     current_user: Annotated[
         CurrentUser,
-        Depends(require_permission(Module.CATEGORIA, Action.READ)),
+        Depends(require_permission(Module.CATEGORIA, Action.AUDIT)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> CategoriaResponseAudit:

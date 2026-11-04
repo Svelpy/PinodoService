@@ -103,7 +103,7 @@ async def get_color_audit(
     color_id: UUID,
     current_user: Annotated[
         CurrentUser,
-        Depends(require_permission(Module.COLOR, Action.READ)),
+        Depends(require_permission(Module.COLOR, Action.AUDIT)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ColorResponseAudit:

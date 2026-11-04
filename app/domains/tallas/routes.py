@@ -100,7 +100,7 @@ async def get_talla_audit(
     talla_id: UUID,
     current_user: Annotated[
         CurrentUser,
-        Depends(require_permission(Module.TALLA, Action.READ)),
+        Depends(require_permission(Module.TALLA, Action.AUDIT)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> TallaResponseAudit:

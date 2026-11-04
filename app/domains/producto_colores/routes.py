@@ -116,7 +116,7 @@ async def get_producto_color_audit(
     producto_color_id: UUID,
     current_user: Annotated[
         CurrentUser,
-        Depends(require_permission(Module.PRODUCTO_COLOR, Action.READ)),
+        Depends(require_permission(Module.PRODUCTO_COLOR, Action.AUDIT)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProductoColorResponseAudit:

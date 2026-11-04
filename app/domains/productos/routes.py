@@ -120,7 +120,7 @@ async def get_producto_audit(
     producto_id: UUID,
     current_user: Annotated[
         CurrentUser,
-        Depends(require_permission(Module.PRODUCTO, Action.READ)),
+        Depends(require_permission(Module.PRODUCTO, Action.AUDIT)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProductoResponseAudit:

@@ -742,8 +742,92 @@ can_manage_role(actor_role, target_role) -> bool
 Agregar un rol exige actualizar ambas estructuras en ese archivo, y solo en
 ese archivo.
 
-Las routes verifican el permiso por módulo. El service de usuarios aplica
-además la jerarquía:
+#### Niveles de acceso
+
+Cada endpoint pertenece a exactamente uno de estos niveles, evaluados en orden:
+
+```text
+1. Pública              → sin dependencia de usuario
+2. Recurso propio (/me) → get_current_principal
+3. Capacidad de módulo  → require_permission(Module, Action)   ← por defecto
+4. Vista de un rol      → require_role(...)                    ← excepción
+```
+
+- **Pública:** endpoints abiertos sin login, como la autenticación (login,
+  registro, refresh, recuperación de contraseña), los endpoints de sistema
+  (health) y las lecturas públicas que defina un dominio, por ejemplo un
+  catálogo. Una lectura pública aplica las reglas de visibilidad del dominio y
+  nunca expone campos de auditoría. Si su respuesta cambia cuando hay un
+  usuario autenticado, usa `get_current_principal_optional`. Los endpoints
+  públicos que reciben credenciales o datos del cliente deben tener rate limit.
+- **`/me`:** no verifica permisos por módulo, porque su autorización es la
+  identidad: solo opera sobre el usuario autenticado. El id del recurso se
+  obtiene únicamente de `current_user.id`; nunca se acepta un id del path,
+  query o body. Así, un rol sin acceso al módulo de usuarios puede consultar y
+  editar su propio perfil y cambiar su contraseña.
+- **`require_permission`:** opción por defecto para toda operación sobre un
+  recurso de un módulo, sea CRUD o no.
+- **`require_role`:** solo cuando el endpoint está definido por el rol, es
+  decir, su respuesta o flujo no tiene sentido para otro rol (por ejemplo,
+  dashboards o resúmenes de inicio por rol).
+
+#### Cómo elegir entre `require_permission` y `require_role`
+
+Aplicar esta prueba:
+
+> Si mañana se crea un rol nuevo, ¿debería poder darse acceso a este endpoint
+> modificando solo la matriz de permisos?
+
+- **Sí** → `require_permission`.
+- **No**, porque el endpoint pertenece a un rol y otro rol necesitaría una
+  vista distinta → `require_role`.
+
+Las tareas del sistema (expirar registros, recalcular saldos) idealmente no se
+exponen como endpoints, sino como jobs programados. Si deben exponerse, se
+acepta `require_role` con los roles operativos explícitos.
+
+#### Las acciones son capacidades, no métodos HTTP
+
+`Action` representa lo que el rol puede hacer, no el verbo HTTP del endpoint.
+
+```text
+POST /recurso/{id}/confirmar  → UPDATE
+POST /recurso/{id}/cancelar   → UPDATE
+POST /recurso/{id}/imagen     → UPDATE
+POST /recurso/sugerir-valor   → CREATE   (ayuda previa a crear)
+GET  /recurso/{id}/audit      → AUDIT
+```
+
+#### Matriz de permisos
+
+- `ROLE_PERMISSIONS` es la única fuente de verdad de `rol × módulo → acciones`.
+- Se deniega por defecto: un módulo ausente equivale a sin acceso.
+- Cada rol lista todos los módulos, incluso los que no puede usar, para que
+  la matriz se lea como una tabla.
+- Los conjuntos de acciones son `frozenset`, escritos de forma explícita en
+  cada entrada, aunque se repitan, para mayor legibilidad. No se usan
+  constantes con nombre para agruparlas.
+- El acceso vacío se escribe `frozenset()`. Nunca `{}`, que en Python es un
+  `dict`.
+- Una entrada con menos acciones que el resto lleva un comentario con su
+  motivo de negocio.
+
+```python
+ROLE_PERMISSIONS: dict[Role, dict[Module, frozenset[Action]]] = {
+    Role.EJEMPLO: {
+        Module.A: frozenset({Action.READ, Action.UPDATE}),  # motivo de negocio
+        Module.B: frozenset(),  # sin acceso
+    },
+}
+
+
+def has_permission(role: Role, module: Module, action: Action) -> bool:
+    return action in ROLE_PERMISSIONS.get(role, {}).get(module, frozenset())
+```
+
+#### Jerarquía de usuarios
+
+El service de usuarios aplica además la jerarquía:
 
 - un usuario solo puede crear, modificar, eliminar o restablecer la contraseña
   de usuarios con un rol estrictamente inferior al suyo; nunca de su mismo rol

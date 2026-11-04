@@ -105,7 +105,7 @@ async def get_seccion_audit(
     seccion_id: UUID,
     current_user: Annotated[
         CurrentUser,
-        Depends(require_permission(Module.SECCION, Action.READ)),
+        Depends(require_permission(Module.SECCION, Action.AUDIT)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> SeccionResponseAudit:

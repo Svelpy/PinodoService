@@ -26,6 +26,7 @@ class Action(str, Enum):
     READ = "READ"
     UPDATE = "UPDATE"
     DELETE = "DELETE"
+    AUDIT = "AUDIT"
 
 
 class TipoImagen(str, Enum):

@@ -121,7 +121,7 @@ async def get_sku_audit(
     sku_id: UUID,
     current_user: Annotated[
         CurrentUser,
-        Depends(require_permission(Module.SKU, Action.READ)),
+        Depends(require_permission(Module.SKU, Action.AUDIT)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> SkuResponseAudit:
