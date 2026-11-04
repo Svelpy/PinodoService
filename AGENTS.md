@@ -730,6 +730,7 @@ autorización:
 ```text
 ROLE_PERMISSIONS → acciones que cada rol puede ejecutar en cada módulo
 ROLE_LEVEL       → jerarquía de roles; un número mayor es un rango superior
+ROLES_*          → grupos de roles por alcance de datos, cuando existan
 ```
 
 Expone:
@@ -739,7 +740,7 @@ has_permission(role, module, action) -> bool
 can_manage_role(actor_role, target_role) -> bool
 ```
 
-Agregar un rol exige actualizar ambas estructuras en ese archivo, y solo en
+Agregar un rol exige actualizar todas las estructuras de ese archivo, y solo
 ese archivo.
 
 #### Niveles de acceso
@@ -823,6 +824,94 @@ ROLE_PERMISSIONS: dict[Role, dict[Module, frozenset[Action]]] = {
 
 def has_permission(role: Role, module: Module, action: Action) -> bool:
     return action in ROLE_PERMISSIONS.get(role, {}).get(module, frozenset())
+```
+
+#### Alcance de datos (segunda puerta)
+
+La autorización tiene dos puertas y ambas son obligatorias:
+
+```text
+1. Permiso → ¿este rol puede usar este endpoint?          → dependencia + matriz de permisos
+2. Alcance → ¿qué filas puede ver o modificar este actor? → alcance resuelto por el service
+```
+
+La primera puerta no protege los datos: sin la segunda, un rol con `READ` sobre
+un módulo puede leer todas sus filas.
+
+El alcance no es lo mismo que la visibilidad del dominio (`is_visible`). La
+visibilidad decide qué se muestra al público; el alcance decide qué filas
+corresponden a cada actor autenticado.
+
+**Cuándo un módulo necesita alcance.** Para cada módulo, y para cada rol que
+tenga alguna acción sobre él en la matriz, responder:
+
+> ¿Este rol debe ver o modificar **todas** las filas del módulo?
+
+- **Sí para todos los roles con acceso** → no necesita alcance.
+- **No para al menos un rol** → necesita alcance, aplicado a todo lo que ese
+  rol pueda leer o modificar.
+
+**Reglas de implementación.**
+
+1. **Una única resolución de alcance por módulo.** Recibe el actor (`id`, `rol`
+   y el ámbito organizativo que corresponda, como una sucursal o un negocio) y
+   produce el alcance. La reutilizan todas las lecturas del módulo: `get`,
+   `list`, `get_by_*` y `audit`.
+2. **Denegar por defecto.** Un rol no contemplado recibe un alcance vacío, que
+   no devuelve ninguna fila. Nunca recibe un alcance "sin filtro".
+3. **Las escrituras también se filtran.** `update`, `delete` y acciones como
+   confirmar o cancelar buscan la fila con el mismo alcance. De lo contrario,
+   un actor puede modificar registros ajenos si conoce su id.
+4. **Los grupos de roles son constantes en `permissions.py`**, por ejemplo
+   `ROLES_WITH_GLOBAL_SCOPE` o `BUSINESS_SCOPED_ROLES`, junto a la matriz.
+   Nunca se escriben como condiciones sueltas repartidas por el código.
+5. **Fuera de alcance = `404`; sin la acción = `403`.**
+   - Si el actor no puede ver la fila, se responde que no existe, para no
+     revelar su existencia.
+   - Si la ve pero no puede ejecutar esa acción sobre ella, se responde `403`.
+     Por ejemplo, la jerarquía de usuarios: un OWNER ve a un SUPERADMIN en el
+     listado, pero no puede modificarlo.
+6. **Un test por rol** comprueba que no obtiene ni modifica filas fuera de su
+   alcance, igual que se prueba el `403` de la primera puerta.
+
+Las comprobaciones de integridad no aplican el alcance, porque protegen los
+datos y no la vista del actor. Consultan siempre todas las filas activas:
+
+- la unicidad, por ejemplo un `get_by_slug` usado para rechazar un duplicado;
+- las referencias activas que bloquean una eliminación con `409` (§5);
+- los hijos que se eliminan en cascada (§5).
+
+**Dónde vive el alcance.**
+
+> Los roles nunca bajan al repository. El SQL nunca sube al service.
+
+```text
+repositories.py → <Modulo>Scope: dataclass sin roles (business_id, all, ...)
+                  contrato de entrada del repository: alcance → WHERE
+services.py     → resolución del alcance a partir del actor: actor → <Modulo>Scope
+```
+
+La clase del alcance se define en el repository, que es quien la consume. Así,
+el service la importa y el repository no importa al service (§18).
+
+```python
+# repositories.py: aplica el alcance, sin roles
+@dataclass(frozen=True)
+class OrderScope:
+    business_id: UUID | None = None
+    all: bool = False
+
+
+# services.py: decide el alcance, sin SQL
+def _scope_for(actor: CurrentUser) -> OrderScope:
+    if actor.rol in ROLES_WITH_GLOBAL_SCOPE:
+        return OrderScope(all=True)
+    if actor.rol in BUSINESS_SCOPED_ROLES:
+        return OrderScope(business_id=actor.business_id)
+    return OrderScope()  # alcance vacío: no devuelve filas
+
+
+order = await OrderRepository.get(db_session, order_id, scope=_scope_for(actor))
 ```
 
 #### Jerarquía de usuarios
