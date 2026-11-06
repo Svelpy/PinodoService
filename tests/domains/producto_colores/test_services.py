@@ -139,35 +139,10 @@ async def test_create_rechaza_color_repetido_en_el_producto() -> None:
     session.commit.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_update_cambia_color_validando_unicidad_en_el_mismo_producto() -> None:
-    producto_color = _producto_color()
-    nuevo = _color("Negro")
-    actor_id = uuid4()
-
-    with (
-        patch.object(ProductoColorService, "get", new=AsyncMock(return_value=producto_color)),
-        patch.object(ColorRepository, "get_by_id", new=AsyncMock(return_value=nuevo)),
-        patch.object(
-            ProductoColorRepository,
-            "get_active_by_producto_and_color",
-            new=AsyncMock(return_value=None),
-        ) as unique,
-    ):
-        result = await ProductoColorService.update(
-            _session(),
-            producto_color.id,
-            ProductoColorUpdate(color_id=nuevo.id),
-            actor_id,
-        )
-
-    unique.assert_awaited_once_with(
-        producto_color.producto_id,
-        nuevo.id,
-        exclude_id=producto_color.id,
-    )
-    assert result.color_id == nuevo.id
-    assert result.updated_by == actor_id
+def test_update_no_acepta_cambiar_el_color() -> None:
+    # Cambiarlo reescribiría lo que representan sus imágenes, SKUs y ventas.
+    with pytest.raises(ValueError):
+        ProductoColorUpdate.model_validate({"color_id": str(uuid4())})
 
 
 @pytest.mark.asyncio

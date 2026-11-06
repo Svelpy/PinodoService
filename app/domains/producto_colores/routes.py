@@ -108,10 +108,10 @@ async def get_producto_color_audit(
     response_model=ProductoColorDetail,
     summary="Actualizar color de producto",
     description=(
-        "Permite corregir el color (conserva sus imágenes y SKUs) o cambiar su "
-        "visibilidad. El producto no se puede cambiar."
+        "Solo cambia la visibilidad. El color y el producto no se pueden "
+        "cambiar: un color equivocado se elimina y se vuelve a crear."
     ),
-    responses=_error_responses(401, 403, 404, 409, 422, 500),
+    responses=_error_responses(401, 403, 404, 422, 500),
 )
 async def update_producto_color(
     producto_color_id: UUID,

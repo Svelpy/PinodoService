@@ -329,23 +329,11 @@ class ProductoColorService:
         data: ProductoColorUpdate,
         actor_id: UUID,
     ) -> ProductoColor:
-        """
-        Actualiza el color o la visibilidad. Cambiar color_id corrige el color
-        conservando sus imágenes y SKUs; el producto dueño no cambia.
-        """
+        """Actualiza la visibilidad. El color y el producto dueño no cambian."""
         changes = data.model_dump(exclude_unset=True)
         producto_color = await cls.get(db_session, producto_color_id, for_update=bool(changes))
         if not changes:
             return await cls.get(db_session, producto_color_id, load_detail=True)
-
-        if changes.get("color_id", producto_color.color_id) != producto_color.color_id:
-            await cls.validate_color(db_session, changes["color_id"])
-            await cls._validate_unique_color(
-                ProductoColorRepository(db_session),
-                producto_color.producto_id,
-                changes["color_id"],
-                exclude_id=producto_color.id,
-            )
 
         for field_name, value in changes.items():
             setattr(producto_color, field_name, value)

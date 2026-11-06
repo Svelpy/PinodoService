@@ -89,17 +89,14 @@ class ProductoColorCreate(ProductoColorDetailCreate):
 
 
 class ProductoColorUpdate(BaseModel):
-    """producto_id es la foreign key de dueño y no se modifica."""
+    """
+    Solo cambia la visibilidad. producto_id es la foreign key de dueño y no se
+    modifica; color_id tampoco, porque cambiarlo reescribiría lo que
+    representan sus imágenes, sus SKUs y, cuando existan, sus ventas. Un color
+    equivocado se elimina y se vuelve a crear.
+    """
 
-    color_id: UUID | None = Field(default=None)
     is_visible: bool | None = Field(default=None)
-
-    @field_validator("color_id")
-    @classmethod
-    def validate_color_id(cls, value: UUID | None) -> UUID:
-        if value is None:
-            raise ValueError("El color no puede ser null.")
-        return value
 
     @field_validator("is_visible", mode="before")
     @classmethod
@@ -112,8 +109,7 @@ class ProductoColorUpdate(BaseModel):
         extra="forbid",
         json_schema_extra={
             "example": {
-                "color_id": "77777777-7777-4777-8777-777777777777",
-                "is_visible": True,
+                "is_visible": False,
             }
         },
     )

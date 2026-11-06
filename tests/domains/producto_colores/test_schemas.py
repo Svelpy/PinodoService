@@ -28,10 +28,13 @@ def test_producto_color_update_no_permite_cambiar_dueno() -> None:
         ProductoColorUpdate.model_validate({"producto_id": str(uuid4())})
 
 
-@pytest.mark.parametrize("field", ["color_id", "is_visible"])
-def test_producto_color_update_rechaza_null(field: str) -> None:
+def test_producto_color_update_rechaza_visibilidad_null() -> None:
     with pytest.raises(ValidationError):
-        ProductoColorUpdate.model_validate({field: None})
+        ProductoColorUpdate.model_validate({"is_visible": None})
+
+
+def test_producto_color_update_solo_admite_visibilidad() -> None:
+    assert set(ProductoColorUpdate.model_fields) == {"is_visible"}
 
 
 def test_producto_color_response_desde_modelo() -> None:

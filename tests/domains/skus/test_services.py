@@ -341,6 +341,67 @@ async def test_update_rechaza_rebaja_hasta_sin_rebaja() -> None:
     assert "precio" in error.value.details
 
 
+def _con_rebaja_vencida() -> Sku:
+    from datetime import timedelta
+
+    from app.core.config import get_settings
+
+    ayer = SkuService.local_today(get_settings()) - timedelta(days=1)
+    return _sku(precio={"normal": 100.0, "rebajado": 80.0, "rebaja_hasta": ayer.isoformat()})
+
+
+@pytest.mark.asyncio
+async def test_update_nueva_rebaja_no_hereda_una_fecha_vencida() -> None:
+    session = _session()
+    sku = _con_rebaja_vencida()
+
+    with patch.object(SkuService, "get", new=AsyncMock(return_value=sku)):
+        with pytest.raises(AppException) as error:
+            await SkuService.update(
+                session, sku.id, SkuUpdate.model_validate({"precio": {"rebajado": 70}}), uuid4()
+            )
+
+    assert error.value.status_code == 422
+    assert "ya pasó" in error.value.details["precio"]
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_nueva_rebaja_con_fecha_nueva_o_sin_fecha() -> None:
+    con_fecha = await _update(
+        _con_rebaja_vencida(),
+        {"precio": {"rebajado": 70, "rebaja_hasta": "2099-01-31"}},
+    )
+    sin_fecha = await _update(
+        _con_rebaja_vencida(),
+        {"precio": {"rebajado": 70, "rebaja_hasta": None}},
+    )
+
+    assert con_fecha.precio["rebaja_hasta"] == "2099-01-31"
+    assert sin_fecha.precio == {"normal": 100.0, "rebajado": 70.0, "rebaja_hasta": None}
+
+
+@pytest.mark.asyncio
+async def test_update_sin_tocar_la_rebaja_no_exige_su_fecha() -> None:
+    # Cambiar solo el precio normal de un SKU con una rebaja vieja sigue funcionando.
+    result = await _update(_con_rebaja_vencida(), {"precio": {"normal": 120}})
+
+    assert result.precio["normal"] == 120.0
+
+
+@pytest.mark.asyncio
+async def test_update_sin_cambios_reales_no_renueva_la_fecha_del_stock() -> None:
+    session = _session()
+    sku = _sku_rebajado()
+
+    with patch.object(SkuService, "get", new=AsyncMock(return_value=sku)):
+        body = {"stock": {}, "precio": {"normal": 29.95}}
+        result = await SkuService.update(session, sku.id, SkuUpdate.model_validate(body), uuid4())
+
+    assert result.stock["actualizado"] is None
+    session.commit.assert_not_awaited()
+
+
 # --- Inventario ---------------------------------------------------------------
 
 from datetime import date  # noqa: E402

@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.base_model import utc_now
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
 from app.domains.producto_colores.repositories import ProductoColorRepository
 from app.domains.skus.models import Sku
@@ -126,7 +126,22 @@ class SkuService:
         if "rebajado" in changes and changes["rebajado"] is None:
             # Quitar la rebaja quita también su fecha.
             changes["rebaja_hasta"] = None
-        return cls._merged(SkuPrecio, "precio", {**current, **changes})
+        precio = cls._merged(SkuPrecio, "precio", {**current, **changes})
+
+        # Al tocar la rebaja, la fecha que se conserva no puede haber vencido:
+        # si no, la rebaja nueva no se aplicaría nunca y nadie lo notaría.
+        toca_rebaja = "rebajado" in changes or "rebaja_hasta" in changes
+        if (
+            toca_rebaja
+            and precio.rebaja_hasta is not None
+            and precio.rebaja_hasta < cls.local_today(get_settings())
+        ):
+            message = (
+                "La fecha de fin de la rebaja ya pasó; envía una nueva "
+                "rebaja_hasta o null para que no venza."
+            )
+            raise AppException(message, 422, ErrorCode.VALIDATION_ERROR, {"precio": message})
+        return precio
 
     @classmethod
     def _merge_stock(cls, current: dict[str, Any], update: SkuStockUpdate) -> SkuStockInput:
@@ -408,10 +423,16 @@ class SkuService:
         if codigo_barras is not None and codigo_barras != sku.codigo_barras:
             await cls.validate_unique_codigo_barras(repository, codigo_barras, exclude_id=sku.id)
 
+        # Precio y stock solo se guardan si cambian: así stock.actualizado
+        # conserva la fecha del último cambio real.
         if data.precio is not None:
-            changes["precio"] = cls.precio_json(cls._merge_precio(sku.precio, data.precio))
+            precio = cls.precio_json(cls._merge_precio(sku.precio, data.precio))
+            if precio != sku.precio:
+                changes["precio"] = precio
         if data.stock is not None:
-            changes["stock"] = cls.stock_json(cls._merge_stock(sku.stock, data.stock))
+            stock = cls._merge_stock(sku.stock, data.stock)
+            if stock.model_dump() != {key: sku.stock.get(key, 0) for key in ("cantidad", "minimo")}:
+                changes["stock"] = cls.stock_json(stock)
         if not changes:
             return await cls.get(db_session, sku_id, load_detail=True)
 
