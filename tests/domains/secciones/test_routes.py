@@ -16,7 +16,6 @@ from app.domains.secciones.routes import router
 from app.domains.secciones.services import SeccionService
 from app.middlewares.exception_handlers import register_exception_handlers
 from app.shared.enums import Role
-from app.shared.schemas.pagination import PaginatedResponse
 
 
 def _seccion() -> Seccion:
@@ -45,18 +44,21 @@ def route_context() -> Iterator[tuple[TestClient, CurrentUser, MagicMock]]:
         yield client, current_user, db_session
 
 
-def test_list_devuelve_paginacion_con_filtro_de_visibilidad(
+def test_list_devuelve_lista_sin_paginacion_con_filtro_de_visibilidad(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
     client, _, db_session = route_context
-    page = PaginatedResponse(total=1, page=1, per_page=20, total_pages=1, data=[_seccion()])
 
-    with patch.object(SeccionService, "list", new=AsyncMock(return_value=page)) as service:
+    with patch.object(
+        SeccionService, "list", new=AsyncMock(return_value=[_seccion()])
+    ) as service:
         response = client.get("/secciones/", params={"is_visible": "true"})
 
     assert response.status_code == 200
-    assert response.json()["data"][0]["slug"] == "mujer"
-    service.assert_awaited_once_with(db_session, page=1, per_page=20, is_visible=True)
+    body = response.json()
+    assert isinstance(body, list)
+    assert body[0]["slug"] == "mujer"
+    service.assert_awaited_once_with(db_session, is_visible=True)
 
 
 def test_create_pasa_el_actor_al_service(

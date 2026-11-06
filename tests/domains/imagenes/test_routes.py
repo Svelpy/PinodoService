@@ -112,27 +112,15 @@ def test_post_ya_no_acepta_archivos(
 SUBIDA = "https://res.cloudinary.com/demo/image/upload/v1/pinodo/imagenes/foto.jpg"
 
 
-def test_list_filtra_por_color_y_tipo(
+def test_no_existe_listado(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
-    client, _, db_session = route_context
-    producto_color_id = uuid4()
-    page = PaginatedResponse(total=1, page=1, per_page=20, total_pages=1, data=[_imagen()])
+    client, _, _ = route_context
 
-    with patch.object(ImagenService, "list", new=AsyncMock(return_value=page)) as service:
-        response = client.get(
-            "/imagenes/",
-            params={"producto_color_id": str(producto_color_id), "tipo": "MODELO"},
-        )
+    # La galería de un color viene en el Detail; para navegar, /imagenes/biblioteca.
+    response = client.get("/imagenes/")
 
-    assert response.status_code == 200
-    service.assert_awaited_once_with(
-        db_session,
-        page=1,
-        per_page=20,
-        producto_color_id=producto_color_id,
-        tipo=TipoImagen.MODELO,
-    )
+    assert response.status_code == 405
 
 
 def test_patch_solo_acepta_tipo(
@@ -166,7 +154,7 @@ def test_lecturas_declaran_list_item_y_detail(
     def schema_ref(path: str) -> str:
         return paths[path]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
 
-    assert schema_ref("/imagenes/").endswith("PaginatedResponse_ImagenListItem_")
+    assert "get" not in paths["/imagenes/"]
     assert schema_ref("/imagenes/{imagen_id}").endswith("/ImagenDetail")
     assert schema_ref("/imagenes/{imagen_id}/audit").endswith("/ImagenResponseAudit")
 

@@ -140,7 +140,7 @@ class UsuarioService:
                 ErrorCode.VALIDATION_ERROR,
             )
 
-        usuarios, total = await UsuarioRepository(db_session).list(
+        usuarios, total = await UsuarioRepository(db_session).find_many(
             offset=(page - 1) * per_page,
             limit=per_page,
             rol=rol,

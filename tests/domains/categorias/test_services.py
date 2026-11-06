@@ -54,9 +54,9 @@ async def test_create_genera_slug_y_valida_unicidad_dentro_de_la_seccion() -> No
         patch.object(CategoriaRepository, "add") as add,
         patch.object(
             CategoriaService,
-            "get",
+            "get_detail",
             new=AsyncMock(side_effect=lambda *a, **k: add.call_args.args[0]),
-        ) as get,
+        ) as get_detail,
     ):
         categoria = await CategoriaService.create(
             session,
@@ -65,7 +65,7 @@ async def test_create_genera_slug_y_valida_unicidad_dentro_de_la_seccion() -> No
         )
 
     # Responde lo mismo que GET /{id}: se recarga con su Detail.
-    get.assert_awaited_once_with(session, categoria.id, load_detail=True)
+    get_detail.assert_awaited_once_with(session, categoria.id)
 
     get_by_slug.assert_awaited_once_with(seccion.id, "vestidos-largos", exclude_id=None)
     assert categoria.slug == "vestidos-largos"
@@ -182,6 +182,7 @@ async def test_update_mueve_dentro_del_arbol() -> None:
 
     with (
         patch.object(CategoriaService, "get", new=AsyncMock(return_value=botas)),
+        patch.object(CategoriaService, "get_detail", new=AsyncMock(return_value=botas)),
         patch.object(CategoriaRepository, "get_by_id", new=_by_id(ropa, zapatos, botas)),
         patch.object(CategoriaRepository, "has_active_products", new=AsyncMock(return_value=False)),
     ):
@@ -247,6 +248,7 @@ async def test_update_cambio_de_seccion_revalida_slug_en_la_seccion_destino() ->
 
     with (
         patch.object(CategoriaService, "get", new=AsyncMock(return_value=categoria)),
+        patch.object(CategoriaService, "get_detail", new=AsyncMock(return_value=categoria)),
         patch.object(SeccionRepository, "get_by_id", new=AsyncMock(return_value=destino)),
         patch.object(CategoriaRepository, "has_active_children", new=AsyncMock(return_value=False)),
         patch.object(CategoriaRepository, "has_active_products", new=AsyncMock(return_value=False)),
@@ -344,7 +346,7 @@ async def test_arbol_agrupa_por_seccion_e_incluye_secciones_vacias() -> None:
     zapatos = _categoria(mujer.id, "Zapatos")
 
     with (
-        patch.object(SeccionRepository, "list_all", new=AsyncMock(return_value=[mujer, hombre])),
+        patch.object(SeccionRepository, "find_many",new=AsyncMock(return_value=[mujer, hombre])),
         patch.object(
             CategoriaRepository,
             "list_for_tree",
@@ -364,6 +366,106 @@ async def test_arbol_agrupa_por_seccion_e_incluye_secciones_vacias() -> None:
 
     assert arbol[1].categorias.total == 0
     assert arbol[1].categorias.data == []
+
+
+def _arbol_con_ocultos() -> tuple[list[Seccion], list[Categoria]]:
+    """
+    Mujer (visible): Ropa > Vestidos (oculta) > Largos (visible pero bajo una oculta),
+                     Ropa > Faldas, y Zapatos (oculta).
+    Hombre (visible): sin categorías ocultas.
+    Niño (oculta): Camisas (visible pero en una sección oculta).
+    """
+    mujer, hombre, nino = _seccion("Mujer"), _seccion("Hombre"), _seccion("Nino")
+    nino.is_visible = False
+    ropa = _categoria(mujer.id, "Ropa")
+    vestidos = _categoria(mujer.id, "Vestidos", parent_id=ropa.id)
+    vestidos.is_visible = False
+    largos = _categoria(mujer.id, "Largos", parent_id=vestidos.id)
+    faldas = _categoria(mujer.id, "Faldas", parent_id=ropa.id)
+    zapatos = _categoria(mujer.id, "Zapatos")
+    zapatos.is_visible = False
+    pantalones = _categoria(hombre.id, "Pantalones")
+    camisas = _categoria(nino.id, "Camisas")
+    return [mujer, hombre, nino], [ropa, vestidos, largos, faldas, zapatos, pantalones, camisas]
+
+
+async def _arbol(is_visible: bool | None) -> list:
+    secciones, categorias = _arbol_con_ocultos()
+    with (
+        patch.object(SeccionRepository, "find_many", new=AsyncMock(return_value=secciones)),
+        patch.object(CategoriaRepository, "list_for_tree", new=AsyncMock(return_value=categorias)),
+    ):
+        return await CategoriaService.arbol(_session(), is_visible=is_visible)
+
+
+def _nombres(nodos: list) -> list:
+    return [(nodo.data.nombre, _nombres(nodo.children)) for nodo in nodos]
+
+
+@pytest.mark.asyncio
+async def test_arbol_sin_filtro_devuelve_visibles_y_ocultos() -> None:
+    arbol = await _arbol(None)
+
+    assert [item.seccion.nombre for item in arbol] == ["Mujer", "Hombre", "Nino"]
+    assert arbol[0].categorias.total == 5
+    assert arbol[2].categorias.total == 1
+
+
+@pytest.mark.asyncio
+async def test_arbol_visible_poda_las_ramas_ocultas_y_las_secciones_ocultas() -> None:
+    arbol = await _arbol(True)
+
+    assert [item.seccion.nombre for item in arbol] == ["Mujer", "Hombre"]
+    assert _nombres(arbol[0].categorias.data) == [("Ropa", [("Faldas", [])])]
+    assert arbol[0].categorias.total == 2
+    assert _nombres(arbol[1].categorias.data) == [("Pantalones", [])]
+
+
+@pytest.mark.asyncio
+async def test_arbol_oculto_devuelve_cada_rama_oculta_bajo_su_seccion() -> None:
+    arbol = await _arbol(False)
+
+    # Hombre no tiene nada oculto; Niño está oculta con todo su contenido.
+    assert [item.seccion.nombre for item in arbol] == ["Mujer", "Nino"]
+    # Vestidos cuelga de la sección porque su padre Ropa es visible; Largos se
+    # incluye porque está bajo una categoría oculta.
+    assert _nombres(arbol[0].categorias.data) == [
+        ("Vestidos", [("Largos", [])]),
+        ("Zapatos", []),
+    ]
+    assert arbol[0].categorias.total == 3
+    assert _nombres(arbol[1].categorias.data) == [("Camisas", [])]
+
+
+@pytest.mark.asyncio
+async def test_detail_trae_la_seccion_y_el_arbol_completo_de_la_seccion() -> None:
+    secciones, categorias = _arbol_con_ocultos()
+    mujer = secciones[0]
+    vestidos = categorias[1]
+    vestidos.seccion = mujer
+    de_mujer = [categoria for categoria in categorias if categoria.seccion_id == mujer.id]
+
+    with (
+        patch.object(CategoriaService, "get", new=AsyncMock(return_value=vestidos)) as get,
+        patch.object(
+            CategoriaRepository,
+            "list_for_tree",
+            new=AsyncMock(return_value=de_mujer),
+        ) as list_for_tree,
+    ):
+        detail = await CategoriaService.get_detail(_session(), vestidos.id)
+
+    assert get.await_args.kwargs == {"load_detail": True}
+    list_for_tree.assert_awaited_once_with(mujer.id)
+    assert detail.nombre == "Vestidos"
+    assert detail.seccion.nombre == "Mujer"
+    # Árbol completo de la sección, con visibles y ocultas.
+    assert detail.arbol.total == 5
+    assert _nombres(detail.arbol.data) == [
+        ("Ropa", [("Vestidos", [("Largos", [])]), ("Faldas", [])]),
+        ("Zapatos", []),
+    ]
+    assert not hasattr(detail, "subcategorias")
 
 
 @pytest.mark.asyncio

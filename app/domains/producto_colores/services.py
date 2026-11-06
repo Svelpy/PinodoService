@@ -16,6 +16,7 @@ from app.domains.producto_colores.models import ProductoColor
 from app.domains.producto_colores.repositories import ProductoColorRepository
 from app.domains.producto_colores.schemas import (
     ProductoColorCreate,
+    ProductoColorDetail,
     ProductoColorDetailCreate,
     ProductoColorListItem,
     ProductoColorUpdate,
@@ -131,6 +132,17 @@ class ProductoColorService:
         return producto_color
 
     @staticmethod
+    def detail(producto_color: ProductoColor, settings: Settings) -> ProductoColorDetail:
+        """
+        ProductoColorDetail del color cargado con load_detail, con el precio
+        vigente hoy de cada SKU. Lo usan GET /{id}, POST y PATCH.
+        """
+        return ProductoColorDetail.model_validate(
+            producto_color,
+            context=SkuService.detail_context(settings),
+        )
+
+    @staticmethod
     async def list(
         db_session: AsyncSession,
         *,
@@ -154,7 +166,7 @@ class ProductoColorService:
                 ErrorCode.VALIDATION_ERROR,
             )
 
-        producto_colores, total = await ProductoColorRepository(db_session).list(
+        producto_colores, total = await ProductoColorRepository(db_session).find_many(
             offset=(page - 1) * per_page,
             limit=per_page,
             producto_id=producto_id,

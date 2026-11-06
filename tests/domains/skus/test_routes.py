@@ -56,33 +56,15 @@ def route_context() -> Iterator[tuple[TestClient, CurrentUser, MagicMock]]:
         yield client, current_user, db_session
 
 
-def test_list_embebe_talla_expone_precio_como_numero_y_pasa_filtros(
+def test_no_existe_listado(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
-    client, _, db_session = route_context
-    producto_color_id = uuid4()
-    page = PaginatedResponse(total=1, page=1, per_page=20, total_pages=1, data=[_sku_con_talla()])
+    client, _, _ = route_context
 
-    with patch.object(SkuService, "list", new=AsyncMock(return_value=page)) as service:
-        response = client.get(
-            "/skus/",
-            params={"producto_color_id": str(producto_color_id), "bajo_minimo": "true"},
-        )
+    # El listado de SKUs es /skus/inventario.
+    response = client.get("/skus/")
 
-    assert response.status_code == 200
-    item = response.json()["data"][0]
-    assert item["precio"] == {"normal": 29.95, "rebajado": 19.95, "rebaja_hasta": "2026-12-31"}
-    assert item["stock"]["cantidad"] == 12
-    assert item["talla"]["etiqueta"] == "M"
-    service.assert_awaited_once_with(
-        db_session,
-        page=1,
-        per_page=20,
-        producto_color_id=producto_color_id,
-        talla_id=None,
-        is_visible=None,
-        bajo_minimo=True,
-    )
+    assert response.status_code == 405
 
 
 def test_get_devuelve_detail_con_la_talla(
@@ -95,7 +77,10 @@ def test_get_devuelve_detail_con_la_talla(
         response = client.get(f"/skus/{sku.id}")
 
     assert response.status_code == 200
-    assert response.json()["talla"]["etiqueta"] == "M"
+    body = response.json()
+    assert body["talla"]["etiqueta"] == "M"
+    assert body["precio"] == {"normal": 29.95, "rebajado": 19.95, "rebaja_hasta": "2026-12-31"}
+    assert body["stock"]["cantidad"] == 12
     service.assert_awaited_once_with(db_session, sku.id, load_detail=True)
 
 

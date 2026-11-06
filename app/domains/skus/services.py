@@ -15,6 +15,7 @@ from app.domains.skus.models import Sku
 from app.domains.skus.repositories import SkuRepository
 from app.domains.skus.schemas import (
     SkuCreate,
+    SkuDetail,
     SkuInventarioItem,
     SkuListItem,
     SkuPrecio,
@@ -219,7 +220,7 @@ class SkuService:
                 ErrorCode.VALIDATION_ERROR,
             )
 
-        skus, total = await SkuRepository(db_session).list(
+        skus, total = await SkuRepository(db_session).find_many(
             offset=(page - 1) * per_page,
             limit=per_page,
             producto_color_id=producto_color_id,
@@ -244,11 +245,20 @@ class SkuService:
     @staticmethod
     def precio_vigente(precio: SkuPrecio, today: date) -> Decimal:
         """El rebajado mientras la rebaja siga vigente (rebaja_hasta incluido); si no, el normal."""
-        if precio.rebajado is not None and (
-            precio.rebaja_hasta is None or precio.rebaja_hasta >= today
-        ):
-            return precio.rebajado
-        return precio.normal
+        return precio.vigente(today)
+
+    @classmethod
+    def detail_context(cls, settings: Settings) -> dict[str, date]:
+        """
+        Contexto de validación para construir SkuDetail, también embebido en
+        ProductoColorDetail y ProductoDetail: la fecha de hoy en la tienda.
+        """
+        return {"today": cls.local_today(settings)}
+
+    @classmethod
+    def detail(cls, sku: Sku, settings: Settings) -> SkuDetail:
+        """SkuDetail del SKU, con su precio vigente hoy. Lo usan GET /{id}, POST y PATCH."""
+        return SkuDetail.model_validate(sku, context=cls.detail_context(settings))
 
     @classmethod
     async def list_inventario(

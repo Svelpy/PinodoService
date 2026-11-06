@@ -16,7 +16,6 @@ from app.domains.secciones.schemas import (
 from app.domains.secciones.services import SeccionService
 from app.shared.enums import Action, Module
 from app.shared.schemas.errors import ErrorResponse
-from app.shared.schemas.pagination import PaginatedResponse
 
 
 router = APIRouter(prefix="/secciones", tags=["Secciones"])
@@ -37,8 +36,9 @@ def _error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
 
 @router.get(
     "/",
-    response_model=PaginatedResponse[SeccionResponse],
+    response_model=list[SeccionResponse],
     summary="Listar secciones",
+    description="Devuelve todas las secciones sin paginación.",
     responses=_error_responses(401, 403, 422, 500),
 )
 async def list_secciones(
@@ -47,16 +47,9 @@ async def list_secciones(
         Depends(require_permission(Module.SECCION, Action.READ)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
-    page: Annotated[int, Query(ge=1)] = 1,
-    per_page: Annotated[int, Query(ge=1, le=100)] = 20,
     is_visible: Annotated[bool | None, Query()] = None,
-) -> PaginatedResponse[SeccionResponse]:
-    return await SeccionService.list(
-        db_session,
-        page=page,
-        per_page=per_page,
-        is_visible=is_visible,
-    )
+) -> list[SeccionResponse]:
+    return await SeccionService.list(db_session, is_visible=is_visible)
 
 
 @router.post(

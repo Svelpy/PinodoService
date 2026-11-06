@@ -21,7 +21,6 @@ from app.domains.skus.models import Sku
 from app.domains.tallas.models import Talla
 from app.middlewares.exception_handlers import register_exception_handlers
 from app.shared.enums import Role
-from app.shared.schemas.pagination import PaginatedResponse
 
 
 def _producto_color() -> ProductoColor:
@@ -73,28 +72,15 @@ def route_context() -> Iterator[tuple[TestClient, CurrentUser, MagicMock]]:
         yield client, current_user, db_session
 
 
-def test_list_filtra_por_producto_y_embebe_el_color(
+def test_no_existe_listado(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
-    client, _, db_session = route_context
-    producto_id = uuid4()
-    page = PaginatedResponse(total=1, page=1, per_page=20, total_pages=1, data=[_list_item()])
+    client, _, _ = route_context
 
-    with patch.object(ProductoColorService, "list", new=AsyncMock(return_value=page)) as service:
-        response = client.get("/producto-colores/", params={"producto_id": str(producto_id)})
+    # Los colores de un producto se leen en GET /productos/{id}.
+    response = client.get("/producto-colores/")
 
-    assert response.status_code == 200
-    item = response.json()["data"][0]
-    assert item["color"]["codigo_hex"] == "#1E3A8A"
-    assert "imagenes" not in item and "skus" not in item
-    service.assert_awaited_once_with(
-        db_session,
-        page=1,
-        per_page=20,
-        producto_id=producto_id,
-        color_id=None,
-        is_visible=None,
-    )
+    assert response.status_code == 405
 
 
 def test_create_pasa_el_actor_al_service(

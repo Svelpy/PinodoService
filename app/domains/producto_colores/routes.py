@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
@@ -11,14 +11,12 @@ from app.domains.auth.schemas import CurrentUser
 from app.domains.producto_colores.schemas import (
     ProductoColorCreate,
     ProductoColorDetail,
-    ProductoColorListItem,
     ProductoColorResponseAudit,
     ProductoColorUpdate,
 )
 from app.domains.producto_colores.services import ProductoColorService
 from app.shared.enums import Action, Module
 from app.shared.schemas.errors import ErrorResponse
-from app.shared.schemas.pagination import PaginatedResponse
 
 
 router = APIRouter(prefix="/producto-colores", tags=["Colores de producto"])
@@ -35,35 +33,6 @@ ERROR_RESPONSES = {
 
 def _error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
     return {status_code: ERROR_RESPONSES[status_code] for status_code in status_codes}
-
-
-@router.get(
-    "/",
-    response_model=PaginatedResponse[ProductoColorListItem],
-    summary="Listar colores de producto",
-    description="Ordenados por fecha de creación; filtra por producto_id para ver los colores de un producto.",
-    responses=_error_responses(401, 403, 422, 500),
-)
-async def list_producto_colores(
-    current_user: Annotated[
-        CurrentUser,
-        Depends(require_permission(Module.PRODUCTO_COLOR, Action.READ)),
-    ],
-    db_session: Annotated[AsyncSession, Depends(get_db)],
-    page: Annotated[int, Query(ge=1)] = 1,
-    per_page: Annotated[int, Query(ge=1, le=100)] = 20,
-    producto_id: Annotated[UUID | None, Query()] = None,
-    color_id: Annotated[UUID | None, Query()] = None,
-    is_visible: Annotated[bool | None, Query()] = None,
-) -> PaginatedResponse[ProductoColorListItem]:
-    return await ProductoColorService.list(
-        db_session,
-        page=page,
-        per_page=per_page,
-        producto_id=producto_id,
-        color_id=color_id,
-        is_visible=is_visible,
-    )
 
 
 @router.post(
@@ -90,7 +59,8 @@ async def create_producto_color(
     db_session: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> ProductoColorDetail:
-    return await ProductoColorService.create(db_session, data, current_user.id, settings)
+    producto_color = await ProductoColorService.create(db_session, data, current_user.id, settings)
+    return ProductoColorService.detail(producto_color, settings)
 
 
 @router.get(
@@ -110,8 +80,10 @@ async def get_producto_color(
         Depends(require_permission(Module.PRODUCTO_COLOR, Action.READ)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> ProductoColorDetail:
-    return await ProductoColorService.get(db_session, producto_color_id, load_detail=True)
+    producto_color = await ProductoColorService.get(db_session, producto_color_id, load_detail=True)
+    return ProductoColorService.detail(producto_color, settings)
 
 
 @router.get(
@@ -149,13 +121,15 @@ async def update_producto_color(
         Depends(require_permission(Module.PRODUCTO_COLOR, Action.UPDATE)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> ProductoColorDetail:
-    return await ProductoColorService.update(
+    producto_color = await ProductoColorService.update(
         db_session,
         producto_color_id,
         data,
         current_user.id,
     )
+    return ProductoColorService.detail(producto_color, settings)
 
 
 @router.delete(

@@ -155,29 +155,47 @@ class CategoriaListItem(CategoriaResponse):
     )
 
 
+_ARBOL_EXAMPLE = {
+    "total": 2,
+    "data": [
+        {
+            "data": CategoriaResponse.model_json_schema()["example"],
+            "children": [
+                {
+                    "data": {
+                        **CategoriaResponse.model_json_schema()["example"],
+                        "id": "66666666-6666-4666-8666-666666666666",
+                        "parent_id": "11111111-1111-4111-8111-111111111111",
+                        "nombre": "Bombers acolchadas",
+                        "slug": "bombers-acolchadas",
+                    },
+                    "children": [],
+                }
+            ],
+        }
+    ],
+}
+
+
 class CategoriaDetail(CategoriaListItem):
     """
-    Jerarquía autorreferenciada: las subcategorías bajan un solo nivel como ListItem.
+    La categoría con su sección y el árbol completo de categorías de esa sección.
 
-    El árbol completo se expone con los schemas de shared/schemas/tree.py.
+    Excepción a la regla de jerarquías autorreferenciadas de AGENTS.md §6 (hijos
+    como ListItem, un nivel), decidida para categorías: el árbol de la sección
+    permite al cliente ubicar la categoría (ruta, hermanas y descendientes) y
+    elegir un nuevo padre sin otra consulta. Incluye categorías visibles y
+    ocultas; excluye las eliminadas.
     """
 
-    subcategorias: list[CategoriaListItem]
+    arbol: TreeResponse[CategoriaResponse]
 
     model_config = ConfigDict(
         from_attributes=True,
         json_schema_extra={
             "example": {
                 **CategoriaListItem.model_json_schema()["example"],
-                "subcategorias": [
-                    {
-                        **CategoriaListItem.model_json_schema()["example"],
-                        "id": "66666666-6666-4666-8666-666666666666",
-                        "parent_id": "11111111-1111-4111-8111-111111111111",
-                        "nombre": "Bombers acolchadas",
-                        "slug": "bombers-acolchadas",
-                    }
-                ],
+                "arbol": _ARBOL_EXAMPLE,
             }
         },
     )
@@ -193,26 +211,7 @@ class CategoriaArbolSeccion(BaseModel):
         json_schema_extra={
             "example": {
                 "seccion": SeccionResponse.model_json_schema()["example"],
-                "categorias": {
-                    "total": 2,
-                    "data": [
-                        {
-                            "data": CategoriaResponse.model_json_schema()["example"],
-                            "children": [
-                                {
-                                    "data": {
-                                        **CategoriaResponse.model_json_schema()["example"],
-                                        "id": "66666666-6666-4666-8666-666666666666",
-                                        "parent_id": "11111111-1111-4111-8111-111111111111",
-                                        "nombre": "Bombers acolchadas",
-                                        "slug": "bombers-acolchadas",
-                                    },
-                                    "children": [],
-                                }
-                            ],
-                        }
-                    ],
-                },
+                "categorias": _ARBOL_EXAMPLE,
             }
         },
     )

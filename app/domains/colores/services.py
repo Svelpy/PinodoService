@@ -7,10 +7,9 @@ from app.core.base_model import utc_now
 from app.core.logging import get_logger
 from app.domains.colores.models import Color
 from app.domains.colores.repositories import ColorRepository
-from app.domains.colores.schemas import ColorCreate, ColorResponse, ColorUpdate
+from app.domains.colores.schemas import ColorCreate, ColorUpdate
 from app.shared.errors.codes import ErrorCode
 from app.shared.errors.exceptions import AppException
-from app.shared.schemas.pagination import PaginatedResponse
 from app.shared.services.slug import generate_slug
 
 
@@ -101,35 +100,10 @@ class ColorService:
     async def list(
         db_session: AsyncSession,
         *,
-        page: int = 1,
-        per_page: int = 20,
         include_deleted: bool = False,
-    ) -> PaginatedResponse[ColorResponse]:
-        if page < 1:
-            raise AppException(
-                "La página debe ser mayor o igual a 1.",
-                422,
-                ErrorCode.VALIDATION_ERROR,
-            )
-        if per_page < 1 or per_page > 100:
-            raise AppException(
-                "La cantidad por página debe estar entre 1 y 100.",
-                422,
-                ErrorCode.VALIDATION_ERROR,
-            )
-
-        colores, total = await ColorRepository(db_session).list(
-            offset=(page - 1) * per_page,
-            limit=per_page,
-            include_deleted=include_deleted,
-        )
-        return PaginatedResponse[ColorResponse](
-            total=total,
-            page=page,
-            per_page=per_page,
-            total_pages=(total + per_page - 1) // per_page,
-            data=colores,
-        )
+    ) -> list[Color]:
+        """Lista sin paginar: el número de colores es pequeño y acotado."""
+        return await ColorRepository(db_session).find_many(include_deleted=include_deleted)
 
     @classmethod
     async def create(

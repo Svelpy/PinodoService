@@ -44,22 +44,35 @@ def test_categoria_response_desde_modelo() -> None:
     assert CategoriaResponse.model_validate(categoria).parent_id is None
 
 
-def test_categoria_detail_baja_un_solo_nivel_de_subcategorias() -> None:
+def test_categoria_detail_embebe_el_arbol_de_la_seccion_con_nodos_planos() -> None:
     seccion = Seccion(nombre="Mujer", slug="mujer")
     padre = Categoria(seccion_id=seccion.id, nombre="Cazadoras", slug="cazadoras")
     hija = Categoria(seccion_id=seccion.id, parent_id=padre.id, nombre="Bombers", slug="bombers")
     orm = SimpleNamespace(
-        **padre.model_dump(),
+        **hija.model_dump(),
         seccion=seccion,
-        subcategorias=[SimpleNamespace(**hija.model_dump(), seccion=seccion)],
+        arbol={
+            "total": 2,
+            "data": [
+                {
+                    "data": padre.model_dump(),
+                    "children": [{"data": hija.model_dump(), "children": []}],
+                }
+            ],
+        },
     )
 
     data = CategoriaDetail.model_validate(orm).model_dump()
 
     assert data["seccion"]["slug"] == "mujer"
-    assert data["subcategorias"][0]["nombre"] == "Bombers"
-    assert data["subcategorias"][0]["parent_id"] == padre.id
-    assert "subcategorias" not in data["subcategorias"][0]
+    assert data["arbol"]["total"] == 2
+    raiz = data["arbol"]["data"][0]
+    assert raiz["data"]["nombre"] == "Cazadoras"
+    assert raiz["children"][0]["data"]["nombre"] == "Bombers"
+    # Los nodos son CategoriaResponse: no repiten la sección ni anidan árboles.
+    assert "seccion" not in raiz["data"]
+    assert "arbol" not in raiz["data"]
+    assert "subcategorias" not in data
     assert "parent" not in data
 
 

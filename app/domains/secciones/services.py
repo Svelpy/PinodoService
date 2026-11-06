@@ -7,10 +7,9 @@ from app.core.base_model import utc_now
 from app.core.logging import get_logger
 from app.domains.secciones.models import Seccion
 from app.domains.secciones.repositories import SeccionRepository
-from app.domains.secciones.schemas import SeccionCreate, SeccionResponse, SeccionUpdate
+from app.domains.secciones.schemas import SeccionCreate, SeccionUpdate
 from app.shared.errors.codes import ErrorCode
 from app.shared.errors.exceptions import AppException
-from app.shared.schemas.pagination import PaginatedResponse
 from app.shared.services.slug import generate_slug
 
 
@@ -101,36 +100,13 @@ class SeccionService:
     async def list(
         db_session: AsyncSession,
         *,
-        page: int = 1,
-        per_page: int = 20,
         is_visible: bool | None = None,
         include_deleted: bool = False,
-    ) -> PaginatedResponse[SeccionResponse]:
-        if page < 1:
-            raise AppException(
-                "La página debe ser mayor o igual a 1.",
-                422,
-                ErrorCode.VALIDATION_ERROR,
-            )
-        if per_page < 1 or per_page > 100:
-            raise AppException(
-                "La cantidad por página debe estar entre 1 y 100.",
-                422,
-                ErrorCode.VALIDATION_ERROR,
-            )
-
-        secciones, total = await SeccionRepository(db_session).list(
-            offset=(page - 1) * per_page,
-            limit=per_page,
+    ) -> list[Seccion]:
+        """Lista sin paginar: el número de secciones es pequeño y acotado."""
+        return await SeccionRepository(db_session).find_many(
             is_visible=is_visible,
             include_deleted=include_deleted,
-        )
-        return PaginatedResponse[SeccionResponse](
-            total=total,
-            page=page,
-            per_page=per_page,
-            total_pages=(total + per_page - 1) // per_page,
-            data=secciones,
         )
 
     @classmethod

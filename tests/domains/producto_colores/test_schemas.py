@@ -1,3 +1,4 @@
+from datetime import date
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -63,11 +64,14 @@ def test_producto_color_list_item_embebe_color_sin_colecciones() -> None:
 
 
 def test_producto_color_detail_embebe_hijos_hasta_las_hojas() -> None:
-    data = ProductoColorDetail.model_validate(_producto_color_orm()).model_dump(mode="json")
+    data = ProductoColorDetail.model_validate(
+        _producto_color_orm(), context={"today": date(2026, 11, 6)}
+    ).model_dump(mode="json")
 
     assert data["imagenes"][0]["url"] == "https://res.cloudinary.com/demo/x.jpg"
     assert data["skus"][0]["talla"]["etiqueta"] == "M"
     assert data["skus"][0]["precio"]["normal"] == 29.95
+    assert data["skus"][0]["precio_vigente"] == 29.95
     assert "producto_color" not in data["skus"][0]
 
 

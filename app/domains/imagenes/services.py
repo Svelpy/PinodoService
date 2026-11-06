@@ -82,7 +82,7 @@ class ImagenService:
                 ErrorCode.VALIDATION_ERROR,
             )
 
-        imagenes, total = await ImagenRepository(db_session).list(
+        imagenes, total = await ImagenRepository(db_session).find_many(
             offset=(page - 1) * per_page,
             limit=per_page,
             producto_color_id=producto_color_id,

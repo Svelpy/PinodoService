@@ -204,7 +204,7 @@ async def test_delete_elimina_en_cascada_colores_hijos_y_enlaces() -> None:
 async def test_list_recorta_la_busqueda_por_nombre() -> None:
     with patch.object(
         ProductoRepository,
-        "list",
+        "find_many",
         new=AsyncMock(return_value=([], 0)),
     ) as repository_list:
         page = await ProductoService.list(_session(), MagicMock(), nombre="  oxford ")

@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -16,7 +16,6 @@ from app.domains.colores.schemas import (
 from app.domains.colores.services import ColorService
 from app.shared.enums import Action, Module
 from app.shared.schemas.errors import ErrorResponse
-from app.shared.schemas.pagination import PaginatedResponse
 
 
 router = APIRouter(prefix="/colores", tags=["Colores"])
@@ -37,10 +36,10 @@ def _error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
 
 @router.get(
     "/",
-    response_model=PaginatedResponse[ColorResponse],
+    response_model=list[ColorResponse],
     summary="Listar colores",
-    description="Ordenados alfabéticamente por nombre.",
-    responses=_error_responses(401, 403, 422, 500),
+    description="Devuelve todos los colores sin paginación, ordenados alfabéticamente por nombre.",
+    responses=_error_responses(401, 403, 500),
 )
 async def list_colores(
     current_user: Annotated[
@@ -48,10 +47,8 @@ async def list_colores(
         Depends(require_permission(Module.COLOR, Action.READ)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
-    page: Annotated[int, Query(ge=1)] = 1,
-    per_page: Annotated[int, Query(ge=1, le=100)] = 20,
-) -> PaginatedResponse[ColorResponse]:
-    return await ColorService.list(db_session, page=page, per_page=per_page)
+) -> list[ColorResponse]:
+    return await ColorService.list(db_session)
 
 
 @router.post(

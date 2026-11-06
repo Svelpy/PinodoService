@@ -2,7 +2,15 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 from app.domains.tallas.schemas import TallaResponse
 from app.shared.services.validators import (
@@ -54,6 +62,15 @@ class SkuPrecio(BaseModel):
     def serialize_money(self, value: Decimal | None) -> float | None:
         # JSONB y la API guardan y exponen los importes como números JSON.
         return None if value is None else float(value)
+
+    def vigente(self, today: date) -> Decimal:
+        """
+        Precio que se cobra en la fecha today: el rebajado mientras la rebaja
+        siga vigente (rebaja_hasta incluido, o sin fecha de fin) y, si no, el normal.
+        """
+        if self.rebajado is not None and (self.rebaja_hasta is None or self.rebaja_hasta >= today):
+            return self.rebajado
+        return self.normal
 
     model_config = ConfigDict(
         extra="forbid",
@@ -421,5 +438,61 @@ class SkuListItem(SkuResponse):
     )
 
 
+class _ConPrecioVigente:
+    """Presenta un Sku con su precio vigente calculado, sin añadir campos al model."""
+
+    def __init__(self, sku: object, precio_vigente: Decimal) -> None:
+        self._sku = sku
+        self.precio_vigente = precio_vigente
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._sku, name)
+
+
 class SkuDetail(SkuListItem):
-    """Sin hijos propios: no añade campos respecto a SkuListItem."""
+    """
+    Sin hijos propios. Añade precio_vigente, el precio que se cobra hoy (ver
+    SkuPrecio.vigente).
+
+    Al construirlo desde un Sku, la fecha de hoy en la zona horaria de la tienda
+    llega en el contexto de validación (context={"today": date}), que el service
+    obtiene de la configuración; el contexto alcanza también a los SkuDetail
+    embebidos en ProductoColorDetail y ProductoDetail.
+    """
+
+    precio_vigente: Decimal
+
+    @model_validator(mode="before")
+    @classmethod
+    def add_precio_vigente(cls, data: object, info: ValidationInfo) -> object:
+        if isinstance(data, dict):
+            if "precio_vigente" in data:
+                return data
+            precio = data.get("precio")
+        else:
+            if "precio_vigente" in getattr(data, "__dict__", {}):
+                return data
+            precio = getattr(data, "precio", None)
+
+        today = (info.context or {}).get("today")
+        if today is None:
+            raise ValueError("SkuDetail necesita la fecha de hoy en el contexto para calcular precio_vigente.")
+        precio_vigente = SkuPrecio.model_validate(precio).vigente(today)
+
+        if isinstance(data, dict):
+            return {**data, "precio_vigente": precio_vigente}
+        return _ConPrecioVigente(data, precio_vigente)
+
+    @field_serializer("precio_vigente", when_used="json")
+    def serialize_precio_vigente(self, value: Decimal) -> float:
+        return float(value)
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                **SkuListItem.model_json_schema()["example"],
+                "precio_vigente": 19.95,
+            }
+        },
+    )

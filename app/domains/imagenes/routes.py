@@ -12,7 +12,6 @@ from app.domains.imagenes.schemas import (
     ImagenBibliotecaItem,
     ImagenCreate,
     ImagenDetail,
-    ImagenListItem,
     ImagenResponseAudit,
     ImagenUpdate,
     ImagenUploadResponse,
@@ -38,37 +37,6 @@ ERROR_RESPONSES = {
 
 def _error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
     return {status_code: ERROR_RESPONSES[status_code] for status_code in status_codes}
-
-
-@router.get(
-    "/",
-    response_model=PaginatedResponse[ImagenListItem],
-    summary="Listar imágenes",
-    description=(
-        "Orden de galería: primero MODELO, luego PRENDA y al final DETALLE; dentro "
-        "de cada tipo, por orden de subida. Filtra por producto_color_id para "
-        "obtener la galería de un color."
-    ),
-    responses=_error_responses(401, 403, 422, 500),
-)
-async def list_imagenes(
-    current_user: Annotated[
-        CurrentUser,
-        Depends(require_permission(Module.IMAGEN, Action.READ)),
-    ],
-    db_session: Annotated[AsyncSession, Depends(get_db)],
-    page: Annotated[int, Query(ge=1)] = 1,
-    per_page: Annotated[int, Query(ge=1, le=100)] = 20,
-    producto_color_id: Annotated[UUID | None, Query()] = None,
-    tipo: Annotated[TipoImagen | None, Query()] = None,
-) -> PaginatedResponse[ImagenListItem]:
-    return await ImagenService.list(
-        db_session,
-        page=page,
-        per_page=per_page,
-        producto_color_id=producto_color_id,
-        tipo=tipo,
-    )
 
 
 @router.get(

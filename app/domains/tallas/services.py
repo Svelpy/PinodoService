@@ -7,10 +7,9 @@ from app.core.base_model import utc_now
 from app.core.logging import get_logger
 from app.domains.tallas.models import Talla
 from app.domains.tallas.repositories import TallaRepository
-from app.domains.tallas.schemas import TallaCreate, TallaResponse, TallaUpdate
+from app.domains.tallas.schemas import TallaCreate, TallaUpdate
 from app.shared.errors.codes import ErrorCode
 from app.shared.errors.exceptions import AppException
-from app.shared.schemas.pagination import PaginatedResponse
 
 
 logger = get_logger(__name__)
@@ -100,35 +99,10 @@ class TallaService:
     async def list(
         db_session: AsyncSession,
         *,
-        page: int = 1,
-        per_page: int = 20,
         include_deleted: bool = False,
-    ) -> PaginatedResponse[TallaResponse]:
-        if page < 1:
-            raise AppException(
-                "La página debe ser mayor o igual a 1.",
-                422,
-                ErrorCode.VALIDATION_ERROR,
-            )
-        if per_page < 1 or per_page > 100:
-            raise AppException(
-                "La cantidad por página debe estar entre 1 y 100.",
-                422,
-                ErrorCode.VALIDATION_ERROR,
-            )
-
-        tallas, total = await TallaRepository(db_session).list(
-            offset=(page - 1) * per_page,
-            limit=per_page,
-            include_deleted=include_deleted,
-        )
-        return PaginatedResponse[TallaResponse](
-            total=total,
-            page=page,
-            per_page=per_page,
-            total_pages=(total + per_page - 1) // per_page,
-            data=tallas,
-        )
+    ) -> list[Talla]:
+        """Lista sin paginar: el número de tallas es pequeño y acotado."""
+        return await TallaRepository(db_session).find_many(include_deleted=include_deleted)
 
     @classmethod
     async def create(

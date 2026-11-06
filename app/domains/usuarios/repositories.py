@@ -45,7 +45,7 @@ class UsuarioRepository:
         result = await self.db_session.execute(statement)
         return result.scalar_one_or_none()
 
-    async def list(
+    async def find_many(
         self,
         *,
         offset: int,

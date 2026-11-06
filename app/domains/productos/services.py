@@ -159,7 +159,10 @@ class ProductoService:
         """Ficha completa del producto, con su resumen."""
         producto = await cls.get(db_session, producto_id, load_detail=True)
         resumenes = await cls._resumenes(db_session, [producto.id], settings)
-        return ProductoDetail.model_validate(_ConResumen(producto, resumenes[producto.id]))
+        return ProductoDetail.model_validate(
+            _ConResumen(producto, resumenes[producto.id]),
+            context=SkuService.detail_context(settings),
+        )
 
     @classmethod
     async def list(
@@ -188,7 +191,7 @@ class ProductoService:
                 ErrorCode.VALIDATION_ERROR,
             )
 
-        productos, total = await ProductoRepository(db_session).list(
+        productos, total = await ProductoRepository(db_session).find_many(
             offset=(page - 1) * per_page,
             limit=per_page,
             seccion_id=seccion_id,

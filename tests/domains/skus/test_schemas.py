@@ -117,8 +117,53 @@ def test_sku_list_item_embebe_talla_y_deja_dueno_como_id() -> None:
     assert "producto_color" not in data
 
 
-def test_sku_detail_no_anade_campos() -> None:
-    assert SkuDetail.model_fields.keys() == SkuListItem.model_fields.keys()
+def test_sku_detail_solo_anade_precio_vigente() -> None:
+    assert SkuDetail.model_fields.keys() - SkuListItem.model_fields.keys() == {"precio_vigente"}
+
+
+def _sku_orm(precio: dict[str, object]) -> Sku:
+    talla = Talla(etiqueta="M")
+    sku = Sku(producto_color_id=uuid4(), talla_id=talla.id, precio=precio)
+    sku.talla = talla
+    return sku
+
+
+@pytest.mark.parametrize(
+    ("precio", "esperado"),
+    [
+        ({"normal": 100.0}, 100.0),
+        ({"normal": 100.0, "rebajado": 80.0}, 80.0),
+        ({"normal": 100.0, "rebajado": 80.0, "rebaja_hasta": "2026-11-06"}, 80.0),
+        ({"normal": 100.0, "rebajado": 80.0, "rebaja_hasta": "2026-11-05"}, 100.0),
+    ],
+    ids=["sin-rebaja", "rebaja-sin-fecha", "vence-hoy", "vencida-ayer"],
+)
+def test_sku_detail_calcula_precio_vigente_con_la_fecha_del_contexto(
+    precio: dict[str, object],
+    esperado: float,
+) -> None:
+    data = SkuDetail.model_validate(
+        _sku_orm(precio), context={"today": date(2026, 11, 6)}
+    ).model_dump(mode="json")
+
+    assert data["precio_vigente"] == esperado
+    assert data["precio"]["normal"] == 100.0
+
+
+def test_sku_detail_sin_fecha_en_el_contexto_falla() -> None:
+    with pytest.raises(ValidationError):
+        SkuDetail.model_validate(_sku_orm({"normal": 100.0}))
+
+
+def test_sku_detail_conserva_precio_vigente_ya_calculado() -> None:
+    # FastAPI vuelve a validar la respuesta como dict, sin contexto.
+    calculado = SkuDetail.model_validate(
+        _sku_orm({"normal": 100.0, "rebajado": 80.0}), context={"today": date(2026, 11, 6)}
+    )
+
+    again = SkuDetail.model_validate(calculado.model_dump())
+
+    assert again.precio_vigente == Decimal("80.0")
 
 
 @pytest.mark.parametrize(

@@ -11,14 +11,12 @@ from app.domains.categorias.schemas import (
     CategoriaArbolSeccion,
     CategoriaCreate,
     CategoriaDetail,
-    CategoriaListItem,
     CategoriaResponseAudit,
     CategoriaUpdate,
 )
 from app.domains.categorias.services import CategoriaService
 from app.shared.enums import Action, Module
 from app.shared.schemas.errors import ErrorResponse
-from app.shared.schemas.pagination import PaginatedResponse
 
 
 router = APIRouter(prefix="/categorias", tags=["Categorías"])
@@ -38,41 +36,18 @@ def _error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
 
 
 @router.get(
-    "/",
-    response_model=PaginatedResponse[CategoriaListItem],
-    summary="Listar categorías",
-    responses=_error_responses(401, 403, 422, 500),
-)
-async def list_categorias(
-    current_user: Annotated[
-        CurrentUser,
-        Depends(require_permission(Module.CATEGORIA, Action.READ)),
-    ],
-    db_session: Annotated[AsyncSession, Depends(get_db)],
-    page: Annotated[int, Query(ge=1)] = 1,
-    per_page: Annotated[int, Query(ge=1, le=100)] = 20,
-    seccion_id: Annotated[UUID | None, Query()] = None,
-    parent_id: Annotated[UUID | None, Query()] = None,
-    is_visible: Annotated[bool | None, Query()] = None,
-) -> PaginatedResponse[CategoriaListItem]:
-    return await CategoriaService.list(
-        db_session,
-        page=page,
-        per_page=per_page,
-        seccion_id=seccion_id,
-        parent_id=parent_id,
-        is_visible=is_visible,
-    )
-
-
-@router.get(
     "/arbol",
     response_model=list[CategoriaArbolSeccion],
     summary="Árbol de categorías por sección",
     description=(
         "Sin seccion_id devuelve todas las secciones con su árbol de categorías, "
         "incluidas las secciones sin categorías. Con seccion_id devuelve solo esa "
-        "sección. Incluye secciones y categorías ocultas."
+        "sección (404 si no existe). "
+        "is_visible filtra por la visibilidad efectiva: una categoría se ve solo si "
+        "ella, todas sus categorías padre y su sección son visibles. "
+        "Sin is_visible devuelve todo; is_visible=true solo lo visible; "
+        "is_visible=false solo lo oculto, con cada rama oculta colgando de su "
+        "sección y las secciones ocultas completas."
     ),
     responses=_error_responses(401, 403, 404, 422, 500),
 )
@@ -83,8 +58,13 @@ async def get_arbol(
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
     seccion_id: Annotated[UUID | None, Query()] = None,
+    is_visible: Annotated[bool | None, Query()] = None,
 ) -> list[CategoriaArbolSeccion]:
-    return await CategoriaService.arbol(db_session, seccion_id=seccion_id)
+    return await CategoriaService.arbol(
+        db_session,
+        seccion_id=seccion_id,
+        is_visible=is_visible,
+    )
 
 
 @router.post(
@@ -115,7 +95,11 @@ async def create_categoria(
     "/{categoria_id}",
     response_model=CategoriaDetail,
     summary="Consultar categoría",
-    description="Incluye la sección y las subcategorías directas (un solo nivel).",
+    description=(
+        "Incluye la sección y el árbol completo de categorías de esa sección, "
+        "visibles y ocultas, para ubicar la categoría (ruta, hermanas y "
+        "descendientes) y elegir un nuevo padre."
+    ),
     responses=_error_responses(401, 403, 404, 422, 500),
 )
 async def get_categoria(
@@ -126,7 +110,7 @@ async def get_categoria(
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> CategoriaDetail:
-    return await CategoriaService.get(db_session, categoria_id, load_detail=True)
+    return await CategoriaService.get_detail(db_session, categoria_id)
 
 
 @router.get(

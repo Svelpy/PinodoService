@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.colores.models import Color
@@ -45,30 +45,16 @@ class ColorRepository:
         result = await self.db_session.execute(statement)
         return result.scalar_one_or_none()
 
-    async def list(
-        self,
-        *,
-        offset: int,
-        limit: int,
-        include_deleted: bool = False,
-    ) -> tuple[list[Color], int]:
+    async def find_many(self, *, include_deleted: bool = False) -> list[Color]:
+        """Colores sin paginar, ordenados alfabéticamente por nombre."""
         filters = []
         if not include_deleted:
             filters.append(Color.is_deleted.is_(False))
 
-        total_result = await self.db_session.execute(
-            select(func.count()).select_from(Color).where(*filters)
-        )
-        total = int(total_result.scalar_one())
-
         result = await self.db_session.execute(
-            select(Color)
-            .where(*filters)
-            .order_by(Color.nombre, Color.id)
-            .offset(offset)
-            .limit(limit)
+            select(Color).where(*filters).order_by(Color.nombre, Color.id)
         )
-        return list(result.scalars().all()), total
+        return list(result.scalars().all())
 
     async def has_active_dependents(self, color_id: UUID) -> bool:
         """True si algún producto_color no eliminado usa el color."""

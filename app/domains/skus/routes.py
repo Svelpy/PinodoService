@@ -12,7 +12,6 @@ from app.domains.skus.schemas import (
     SkuCreate,
     SkuDetail,
     SkuInventarioItem,
-    SkuListItem,
     SkuResponseAudit,
     SkuUpdate,
 )
@@ -38,40 +37,6 @@ def _error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
     return {status_code: ERROR_RESPONSES[status_code] for status_code in status_codes}
 
 
-@router.get(
-    "/",
-    response_model=PaginatedResponse[SkuListItem],
-    summary="Listar SKUs",
-    description=(
-        "Ordenados por color y, dentro de cada color, por el orden de las tallas. "
-        "bajo_minimo=true devuelve los SKUs con stock igual o menor a su mínimo."
-    ),
-    responses=_error_responses(401, 403, 422, 500),
-)
-async def list_skus(
-    current_user: Annotated[
-        CurrentUser,
-        Depends(require_permission(Module.SKU, Action.READ)),
-    ],
-    db_session: Annotated[AsyncSession, Depends(get_db)],
-    page: Annotated[int, Query(ge=1)] = 1,
-    per_page: Annotated[int, Query(ge=1, le=100)] = 20,
-    producto_color_id: Annotated[UUID | None, Query()] = None,
-    talla_id: Annotated[UUID | None, Query()] = None,
-    is_visible: Annotated[bool | None, Query()] = None,
-    bajo_minimo: Annotated[bool | None, Query()] = None,
-) -> PaginatedResponse[SkuListItem]:
-    return await SkuService.list(
-        db_session,
-        page=page,
-        per_page=per_page,
-        producto_color_id=producto_color_id,
-        talla_id=talla_id,
-        is_visible=is_visible,
-        bajo_minimo=bajo_minimo,
-    )
-
-
 @router.post(
     "/",
     response_model=SkuDetail,
@@ -90,8 +55,10 @@ async def create_sku(
         Depends(require_permission(Module.SKU, Action.CREATE)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> SkuDetail:
-    return await SkuService.create(db_session, data, current_user.id)
+    sku = await SkuService.create(db_session, data, current_user.id)
+    return SkuService.detail(sku, settings)
 
 
 @router.get(
@@ -159,8 +126,10 @@ async def get_sku(
         Depends(require_permission(Module.SKU, Action.READ)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> SkuDetail:
-    return await SkuService.get(db_session, sku_id, load_detail=True)
+    sku = await SkuService.get(db_session, sku_id, load_detail=True)
+    return SkuService.detail(sku, settings)
 
 
 @router.get(
@@ -202,8 +171,10 @@ async def update_sku(
         Depends(require_permission(Module.SKU, Action.UPDATE)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> SkuDetail:
-    return await SkuService.update(db_session, sku_id, data, current_user.id)
+    sku = await SkuService.update(db_session, sku_id, data, current_user.id)
+    return SkuService.detail(sku, settings)
 
 
 @router.delete(

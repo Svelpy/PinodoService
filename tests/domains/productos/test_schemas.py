@@ -1,3 +1,4 @@
+from datetime import date
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -98,12 +99,13 @@ def test_producto_list_item_embebe_seccion_sin_colecciones() -> None:
 
 
 def test_producto_detail_embebe_el_agregado_completo_sin_volver_al_dueno() -> None:
-    data = ProductoDetail.model_validate(_producto_orm()).model_dump(mode="json")
+    data = ProductoDetail.model_validate(_producto_orm(), context={"today": date(2026, 11, 6)}).model_dump(mode="json")
     color = data["colores"][0]
 
     assert data["categorias"][0]["slug"] == "camisas"
     assert "seccion" not in data["categorias"][0]
     assert color["color"]["codigo_hex"] == "#1E3A8A"
     assert color["skus"][0]["talla"]["etiqueta"] == "M"
+    assert color["skus"][0]["precio_vigente"] == 29.95
     assert "producto" not in color
     assert color["producto_id"] == data["id"]

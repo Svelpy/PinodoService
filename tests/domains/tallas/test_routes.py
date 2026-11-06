@@ -16,7 +16,6 @@ from app.domains.tallas.routes import router
 from app.domains.tallas.services import TallaService
 from app.middlewares.exception_handlers import register_exception_handlers
 from app.shared.enums import Role
-from app.shared.schemas.pagination import PaginatedResponse
 
 
 def _talla() -> Talla:
@@ -45,18 +44,19 @@ def route_context() -> Iterator[tuple[TestClient, CurrentUser, MagicMock]]:
         yield client, current_user, db_session
 
 
-def test_list_devuelve_paginacion(
+def test_list_devuelve_lista_sin_paginacion(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
     client, _, db_session = route_context
-    page = PaginatedResponse(total=1, page=1, per_page=20, total_pages=1, data=[_talla()])
 
-    with patch.object(TallaService, "list", new=AsyncMock(return_value=page)) as service:
+    with patch.object(TallaService, "list", new=AsyncMock(return_value=[_talla()])) as service:
         response = client.get("/tallas/")
 
     assert response.status_code == 200
-    assert response.json()["data"][0]["etiqueta"] == "M"
-    service.assert_awaited_once_with(db_session, page=1, per_page=20)
+    body = response.json()
+    assert isinstance(body, list)
+    assert body[0]["etiqueta"] == "M"
+    service.assert_awaited_once_with(db_session)
 
 
 def test_create_pasa_el_actor_al_service(

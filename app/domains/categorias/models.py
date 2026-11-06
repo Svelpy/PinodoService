@@ -29,9 +29,3 @@ class Categoria(BaseModel, table=True):
     is_visible: bool = Field(default=True, nullable=False)
 
     seccion: Seccion = Relationship(sa_relationship_kwargs={"lazy": "raise"})
-    subcategorias: list["Categoria"] = Relationship(
-        sa_relationship_kwargs={
-            "lazy": "raise",
-            "order_by": "(Categoria.created_at, Categoria.id)",
-        }
-    )

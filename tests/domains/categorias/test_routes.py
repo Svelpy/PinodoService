@@ -18,7 +18,6 @@ from app.domains.categorias.services import CategoriaService
 from app.domains.secciones.models import Seccion
 from app.middlewares.exception_handlers import register_exception_handlers
 from app.shared.enums import Role
-from app.shared.schemas.pagination import PaginatedResponse
 
 
 SECCION = Seccion(nombre="Mujer", slug="mujer")
@@ -54,27 +53,14 @@ def route_context() -> Iterator[tuple[TestClient, CurrentUser, MagicMock]]:
         yield client, current_user, db_session
 
 
-def test_list_embebe_la_seccion_y_pasa_filtros(
+def test_no_existe_listado_paginado(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
-    client, _, db_session = route_context
-    page = PaginatedResponse(total=1, page=1, per_page=20, total_pages=1, data=[_list_item()])
-    seccion_id = uuid4()
+    client, _, _ = route_context
 
-    with patch.object(CategoriaService, "list", new=AsyncMock(return_value=page)) as service:
-        response = client.get("/categorias/", params={"seccion_id": str(seccion_id)})
+    response = client.get("/categorias/")
 
-    assert response.status_code == 200
-    assert response.json()["data"][0]["seccion"]["slug"] == "mujer"
-    assert "subcategorias" not in response.json()["data"][0]
-    service.assert_awaited_once_with(
-        db_session,
-        page=1,
-        per_page=20,
-        seccion_id=seccion_id,
-        parent_id=None,
-        is_visible=None,
-    )
+    assert response.status_code == 405
 
 
 def test_arbol_no_se_confunde_con_un_id(
@@ -87,22 +73,38 @@ def test_arbol_no_se_confunde_con_un_id(
 
     assert response.status_code == 200
     assert response.json() == []
-    service.assert_awaited_once_with(db_session, seccion_id=None)
+    service.assert_awaited_once_with(db_session, seccion_id=None, is_visible=None)
 
 
-def test_get_devuelve_detail_con_subcategorias(
+def test_arbol_pasa_el_filtro_de_visibilidad(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
     client, _, db_session = route_context
-    detail = SimpleNamespace(**_list_item().__dict__, subcategorias=[_list_item()])
 
-    with patch.object(CategoriaService, "get", new=AsyncMock(return_value=detail)) as service:
+    with patch.object(CategoriaService, "arbol", new=AsyncMock(return_value=[])) as service:
+        response = client.get("/categorias/arbol", params={"is_visible": "false"})
+
+    assert response.status_code == 200
+    service.assert_awaited_once_with(db_session, seccion_id=None, is_visible=False)
+
+
+def test_get_devuelve_detail_con_el_arbol_de_la_seccion(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, _, db_session = route_context
+    arbol = {"total": 1, "data": [{"data": _categoria().model_dump(), "children": []}]}
+    detail = SimpleNamespace(**_list_item().__dict__, arbol=arbol)
+
+    with patch.object(CategoriaService, "get_detail", new=AsyncMock(return_value=detail)) as service:
         response = client.get(f"/categorias/{detail.id}")
 
     assert response.status_code == 200
-    assert response.json()["seccion"]["nombre"] == "Mujer"
-    assert len(response.json()["subcategorias"]) == 1
-    service.assert_awaited_once_with(db_session, detail.id, load_detail=True)
+    body = response.json()
+    assert body["seccion"]["nombre"] == "Mujer"
+    assert body["arbol"]["total"] == 1
+    assert body["arbol"]["data"][0]["data"]["nombre"] == "Ropa"
+    assert "subcategorias" not in body
+    service.assert_awaited_once_with(db_session, detail.id)
 
 
 def test_audit_reutiliza_get_sin_cargar_el_detail(

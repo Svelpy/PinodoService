@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -16,7 +16,6 @@ from app.domains.tallas.schemas import (
 from app.domains.tallas.services import TallaService
 from app.shared.enums import Action, Module
 from app.shared.schemas.errors import ErrorResponse
-from app.shared.schemas.pagination import PaginatedResponse
 
 
 router = APIRouter(prefix="/tallas", tags=["Tallas"])
@@ -37,10 +36,10 @@ def _error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
 
 @router.get(
     "/",
-    response_model=PaginatedResponse[TallaResponse],
+    response_model=list[TallaResponse],
     summary="Listar tallas",
-    description="Ordenadas por fecha de creación.",
-    responses=_error_responses(401, 403, 422, 500),
+    description="Devuelve todas las tallas sin paginación, ordenadas por fecha de creación.",
+    responses=_error_responses(401, 403, 500),
 )
 async def list_tallas(
     current_user: Annotated[
@@ -48,10 +47,8 @@ async def list_tallas(
         Depends(require_permission(Module.TALLA, Action.READ)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
-    page: Annotated[int, Query(ge=1)] = 1,
-    per_page: Annotated[int, Query(ge=1, le=100)] = 20,
-) -> PaginatedResponse[TallaResponse]:
-    return await TallaService.list(db_session, page=page, per_page=per_page)
+) -> list[TallaResponse]:
+    return await TallaService.list(db_session)
 
 
 @router.post(

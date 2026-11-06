@@ -22,19 +22,14 @@ class CategoriaRepository:
         for_update: bool = False,
         load_detail: bool = False,
     ) -> Categoria | None:
-        """Con load_detail carga la sección y las subcategorías activas que necesita el Detail."""
+        """Con load_detail carga la sección que embebe el Detail; el árbol lo arma el service."""
         statement = select(Categoria).where(Categoria.id == categoria_id)
         if not include_deleted:
             statement = statement.where(Categoria.is_deleted.is_(False))
         if for_update:
             statement = statement.with_for_update()
         if load_detail:
-            statement = statement.options(
-                selectinload(Categoria.seccion),
-                selectinload(
-                    Categoria.subcategorias.and_(Categoria.is_deleted.is_(False))
-                ).selectinload(Categoria.seccion),
-            )
+            statement = statement.options(selectinload(Categoria.seccion))
 
         result = await self.db_session.execute(statement)
         return result.scalar_one_or_none()
@@ -80,7 +75,7 @@ class CategoriaRepository:
         )
         return list(result.scalars().all())
 
-    async def list(
+    async def find_many(
         self,
         *,
         offset: int,

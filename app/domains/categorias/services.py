@@ -12,10 +12,12 @@ from app.domains.categorias.repositories import CategoriaRepository
 from app.domains.categorias.schemas import (
     CategoriaArbolSeccion,
     CategoriaCreate,
+    CategoriaDetail,
     CategoriaListItem,
     CategoriaResponse,
     CategoriaUpdate,
 )
+from app.domains.secciones.models import Seccion
 from app.domains.secciones.repositories import SeccionRepository
 from app.domains.secciones.schemas import SeccionResponse
 from app.shared.errors.codes import ErrorCode
@@ -202,22 +204,79 @@ class CategoriaService:
             total += 1 + children_total
         return nodes, total
 
+    @staticmethod
+    def _filter_by_visibility(
+        secciones: list[Seccion],
+        categorias: list[Categoria],
+        is_visible: bool,
+    ) -> tuple[list[Seccion], list[tuple[Categoria, UUID | None]]]:
+        """
+        Filtra el árbol por visibilidad efectiva y devuelve cada categoría con el
+        padre bajo el que se coloca.
+
+        Una categoría es efectivamente visible si ella, todas sus categorías padre
+        y su sección son visibles; así, ocultar una categoría o una sección oculta
+        también todo lo que cuelga de ella.
+
+        - True: secciones visibles y categorías efectivamente visibles.
+        - False: categorías no visibles efectivamente. La raíz de cada rama oculta
+          cuelga directamente de su sección, porque su padre visible no se
+          incluye. Se incluyen las secciones ocultas y las visibles que tengan
+          alguna categoría oculta.
+        """
+        seccion_visible = {seccion.id: seccion.is_visible for seccion in secciones}
+        by_id = {categoria.id: categoria for categoria in categorias}
+        efectiva: dict[UUID, bool] = {}
+
+        def visible(categoria: Categoria) -> bool:
+            if categoria.id not in efectiva:
+                parent = by_id.get(categoria.parent_id) if categoria.parent_id else None
+                padre_visible = (
+                    visible(parent)
+                    if parent is not None
+                    else seccion_visible.get(categoria.seccion_id, False)
+                )
+                efectiva[categoria.id] = padre_visible and categoria.is_visible
+            return efectiva[categoria.id]
+
+        seleccion: list[tuple[Categoria, UUID | None]] = []
+        for categoria in categorias:
+            if visible(categoria) != is_visible:
+                continue
+            parent_id = categoria.parent_id
+            if not is_visible and parent_id is not None and visible(by_id[parent_id]):
+                parent_id = None
+            seleccion.append((categoria, parent_id))
+
+        if is_visible:
+            secciones = [seccion for seccion in secciones if seccion.is_visible]
+        else:
+            con_ocultas = {categoria.seccion_id for categoria, _ in seleccion}
+            secciones = [
+                seccion
+                for seccion in secciones
+                if not seccion.is_visible or seccion.id in con_ocultas
+            ]
+        return secciones, seleccion
+
     @classmethod
     async def arbol(
         cls,
         db_session: AsyncSession,
         *,
         seccion_id: UUID | None = None,
+        is_visible: bool | None = None,
     ) -> list[CategoriaArbolSeccion]:
         """
         Árbol completo de categorías agrupado por sección.
 
         Sin seccion_id devuelve todas las secciones, incluidas las que no tienen
         categorías; con seccion_id, solo esa sección (404 si no existe).
+        is_visible filtra por visibilidad efectiva (ver _filter_by_visibility).
         """
         seccion_repository = SeccionRepository(db_session)
         if seccion_id is None:
-            secciones = await seccion_repository.list_all()
+            secciones = await seccion_repository.find_many()
         else:
             seccion = await seccion_repository.get_by_id(seccion_id)
             if seccion is None:
@@ -229,11 +288,16 @@ class CategoriaService:
             secciones = [seccion]
 
         categorias = await CategoriaRepository(db_session).list_for_tree(seccion_id)
+        if is_visible is None:
+            colocadas = [(categoria, categoria.parent_id) for categoria in categorias]
+        else:
+            secciones, colocadas = cls._filter_by_visibility(secciones, categorias, is_visible)
+
         children_by_seccion: dict[UUID, dict[UUID | None, list[Categoria]]] = defaultdict(
             lambda: defaultdict(list)
         )
-        for categoria in categorias:
-            children_by_seccion[categoria.seccion_id][categoria.parent_id].append(categoria)
+        for categoria, parent_id in colocadas:
+            children_by_seccion[categoria.seccion_id][parent_id].append(categoria)
 
         arbol: list[CategoriaArbolSeccion] = []
         for seccion in secciones:
@@ -245,6 +309,25 @@ class CategoriaService:
                 )
             )
         return arbol
+
+    @classmethod
+    async def get_detail(cls, db_session: AsyncSession, categoria_id: UUID) -> CategoriaDetail:
+        """
+        La categoría con su sección y el árbol completo de categorías de esa
+        sección, visibles y ocultas. Lo usan GET /{id}, POST y PATCH.
+        """
+        categoria = await cls.get(db_session, categoria_id, load_detail=True)
+        categorias = await CategoriaRepository(db_session).list_for_tree(categoria.seccion_id)
+
+        children_by_parent: dict[UUID | None, list[Categoria]] = defaultdict(list)
+        for item in categorias:
+            children_by_parent[item.parent_id].append(item)
+        nodes, total = cls._build_tree(None, children_by_parent)
+
+        return CategoriaDetail(
+            **CategoriaListItem.model_validate(categoria).model_dump(),
+            arbol=TreeResponse[CategoriaResponse](total=total, data=nodes),
+        )
 
     @staticmethod
     async def list(
@@ -270,7 +353,7 @@ class CategoriaService:
                 ErrorCode.VALIDATION_ERROR,
             )
 
-        categorias, total = await CategoriaRepository(db_session).list(
+        categorias, total = await CategoriaRepository(db_session).find_many(
             offset=(page - 1) * per_page,
             limit=per_page,
             seccion_id=seccion_id,
@@ -292,7 +375,7 @@ class CategoriaService:
         db_session: AsyncSession,
         data: CategoriaCreate,
         actor_id: UUID,
-    ) -> Categoria:
+    ) -> CategoriaDetail:
         repository = CategoriaRepository(db_session)
         await cls._validate_seccion(db_session, data.seccion_id)
         if data.parent_id is not None:
@@ -315,7 +398,7 @@ class CategoriaService:
         # antes el id para no disparar una carga implícita.
         categoria_id = categoria.id
         db_session.expire_all()
-        return await cls.get(db_session, categoria_id, load_detail=True)
+        return await cls.get_detail(db_session, categoria_id)
 
     @classmethod
     async def update(
@@ -324,7 +407,7 @@ class CategoriaService:
         categoria_id: UUID,
         data: CategoriaUpdate,
         actor_id: UUID,
-    ) -> Categoria:
+    ) -> CategoriaDetail:
         """
         Actualiza una categoría. Si cambia el nombre o la sección se regenera y
         revalida el slug. Una categoría con subcategorías activas o productos
@@ -333,7 +416,7 @@ class CategoriaService:
         changes = data.model_dump(exclude_unset=True)
         categoria = await cls.get(db_session, categoria_id, for_update=bool(changes))
         if not changes:
-            return await cls.get(db_session, categoria_id, load_detail=True)
+            return await cls.get_detail(db_session, categoria_id)
 
         repository = CategoriaRepository(db_session)
         target_seccion_id = changes.get("seccion_id", categoria.seccion_id)
@@ -384,7 +467,7 @@ class CategoriaService:
         logger.info("Categoría actualizada: categoria_id=%s actor_id=%s", categoria.id, actor_id)
         # Responde lo mismo que GET /{id}: se recarga con su Detail.
         db_session.expire_all()
-        return await cls.get(db_session, categoria_id, load_detail=True)
+        return await cls.get_detail(db_session, categoria_id)
 
 
     @classmethod

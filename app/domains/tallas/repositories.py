@@ -46,30 +46,16 @@ class TallaRepository:
         result = await self.db_session.execute(statement)
         return result.scalars().first()
 
-    async def list(
-        self,
-        *,
-        offset: int,
-        limit: int,
-        include_deleted: bool = False,
-    ) -> tuple[list[Talla], int]:
+    async def find_many(self, *, include_deleted: bool = False) -> list[Talla]:
+        """Tallas sin paginar, en orden de creación."""
         filters = []
         if not include_deleted:
             filters.append(Talla.is_deleted.is_(False))
 
-        total_result = await self.db_session.execute(
-            select(func.count()).select_from(Talla).where(*filters)
-        )
-        total = int(total_result.scalar_one())
-
         result = await self.db_session.execute(
-            select(Talla)
-            .where(*filters)
-            .order_by(Talla.created_at, Talla.id)
-            .offset(offset)
-            .limit(limit)
+            select(Talla).where(*filters).order_by(Talla.created_at, Talla.id)
         )
-        return list(result.scalars().all()), total
+        return list(result.scalars().all())
 
     async def has_active_dependents(self, talla_id: UUID) -> bool:
         """True si algún SKU no eliminado usa la talla."""

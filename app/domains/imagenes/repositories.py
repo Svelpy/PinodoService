@@ -60,7 +60,7 @@ class ImagenRepository:
         )
         return result.rowcount
 
-    async def list(
+    async def find_many(
         self,
         *,
         offset: int,
