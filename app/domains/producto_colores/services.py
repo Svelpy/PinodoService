@@ -1,5 +1,5 @@
 from collections.abc import Awaitable, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
@@ -11,6 +11,7 @@ from app.core.logging import get_logger
 from app.domains.colores.repositories import ColorRepository
 from app.domains.imagenes.models import Imagen
 from app.domains.imagenes.repositories import ImagenRepository
+from app.domains.imagenes.schemas import ImagenDetailCreate
 from app.domains.imagenes.services import ImagenService
 from app.domains.producto_colores.models import ProductoColor
 from app.domains.producto_colores.repositories import ProductoColorRepository
@@ -24,6 +25,7 @@ from app.domains.producto_colores.schemas import (
 from app.domains.productos.repositories import ProductoRepository
 from app.domains.skus.models import Sku
 from app.domains.skus.repositories import SkuRepository
+from app.domains.skus.schemas import SkuDetailUpdate, SkuStockInput
 from app.domains.skus.services import SkuService
 from app.integrations.cloudinary import CloudinaryService
 from app.shared.errors.codes import ErrorCode
@@ -63,6 +65,11 @@ class ProductoColorService:
 
         if constraint_name == "uq_producto_colores_producto_color":
             return cls._duplicate_color()
+        # El PATCH del color también crea y edita SKUs.
+        if constraint_name == "uq_skus_color_talla":
+            return SkuService.duplicate_talla()
+        if constraint_name == "uq_skus_codigo_barras":
+            return SkuService.duplicate_codigo_barras()
 
         return AppException(
             "Los datos del color del producto entran en conflicto con un registro existente.",
@@ -183,16 +190,19 @@ class ProductoColorService:
         )
 
     @staticmethod
-    async def _at(path: str, check: Awaitable[None]) -> None:
+    def _with_path(path: str, error: AppException) -> AppException:
+        """Indica en los detalles del error la ruta dentro del árbol."""
+        if path:
+            error.details = {f"{path} -> {key}": message for key, message in error.details.items()}
+        return error
+
+    @classmethod
+    async def _at(cls, path: str, check: Awaitable[None]) -> None:
         """Ejecuta una validación e indica en sus detalles la ruta dentro del árbol."""
         try:
             await check
         except AppException as error:
-            if path:
-                error.details = {
-                    f"{path} -> {key}": message for key, message in error.details.items()
-                }
-            raise
+            raise cls._with_path(path, error)
 
     @classmethod
     async def validate_detail_create(
@@ -328,27 +338,289 @@ class ProductoColorService:
         producto_color_id: UUID,
         data: ProductoColorUpdate,
         actor_id: UUID,
+        settings: Settings,
     ) -> ProductoColor:
-        """Actualiza la visibilidad. El color y el producto dueño no cambian."""
-        changes = data.model_dump(exclude_unset=True)
-        producto_color = await cls.get(db_session, producto_color_id, for_update=bool(changes))
-        if not changes:
+        """
+        Edita el color con sus imágenes y SKUs en una sola transacción (ver
+        ProductoColorUpdate). Todo se valida antes de cambiar nada; si algo
+        falla, no se guarda nada.
+
+        Bloquea el color y después sus SKUs en orden de id, el mismo orden que
+        usan las ventas. Devuelve el color con su Detail cargado.
+        """
+        if not data.model_fields_set:
             return await cls.get(db_session, producto_color_id, load_detail=True)
 
-        for field_name, value in changes.items():
-            setattr(producto_color, field_name, value)
-        producto_color.updated_at = utc_now()
-        producto_color.updated_by = actor_id
-        await cls._commit(db_session, producto_color)
+        producto_color = await cls.get(db_session, producto_color_id, for_update=True)
+        cambia_color = data.color_id is not None and data.color_id != producto_color.color_id
+        if cambia_color:
+            # Corrige la etiqueta: fotos, SKUs y stock siguen siendo los mismos.
+            await cls.validate_color(db_session, data.color_id)
+            await cls._validate_unique_color(
+                ProductoColorRepository(db_session),
+                producto_color.producto_id,
+                data.color_id,
+                exclude_id=producto_color.id,
+            )
 
-        logger.info(
-            "Color de producto actualizado: producto_color_id=%s actor_id=%s",
-            producto_color.id,
-            actor_id,
+        toca_skus = bool(data.skus or data.sku_ids_eliminar)
+        imagenes = (
+            await ImagenRepository(db_session).list_active_by_producto_color(producto_color.id)
+            if data.imagenes is not None
+            else []
         )
-        # Responde lo mismo que GET /{id}: se recarga con su Detail.
+        skus = (
+            await SkuRepository(db_session).list_active_by_producto_color(
+                producto_color.id, for_update=True
+            )
+            if toca_skus
+            else []
+        )
+
+        if data.imagenes is not None:
+            await cls._validate_imagenes(db_session, imagenes, data.imagenes, settings)
+        if toca_skus:
+            await cls._validate_skus(db_session, producto_color.id, skus, data)
+
+        now = utc_now()
+        changed = False
+        if cambia_color:
+            producto_color.color_id = data.color_id
+            changed = True
+        if data.is_visible is not None and data.is_visible != producto_color.is_visible:
+            producto_color.is_visible = data.is_visible
+            changed = True
+        if changed:
+            producto_color.updated_at = now
+            producto_color.updated_by = actor_id
+
+        destinations: dict[str, str] = {}
+        if data.imagenes is not None:
+            imagenes_changed, destinations = await cls._apply_imagenes(
+                db_session, producto_color, imagenes, data.imagenes, actor_id, now
+            )
+            changed = changed or imagenes_changed
+        if toca_skus:
+            skus_changed = await cls._apply_skus(
+                db_session, producto_color.id, skus, data, actor_id, now
+            )
+            changed = changed or skus_changed
+
+        if changed:
+            await cls._commit(db_session)
+            await CloudinaryService.confirm_pending_uploads(destinations, settings)
+            logger.info(
+                "Color de producto actualizado: producto_color_id=%s imagenes_nuevas=%s "
+                "skus_eliminados=%s actor_id=%s",
+                producto_color_id,
+                len(destinations),
+                len(data.sku_ids_eliminar or []),
+                actor_id,
+            )
+        # Responde lo mismo que GET /{id}: se recarga con su Detail, también
+        # cuando no hubo cambios.
         db_session.expire_all()
         return await cls.get(db_session, producto_color_id, load_detail=True)
+
+    @classmethod
+    async def _validate_imagenes(
+        cls,
+        db_session: AsyncSession,
+        actuales: Sequence[Imagen],
+        imagenes: Sequence[ImagenDetailCreate],
+        settings: Settings,
+    ) -> None:
+        """Las imágenes que ya tiene el color se conservan; las nuevas se validan como en el create."""
+        urls_actuales = {imagen.url for imagen in actuales}
+        for index, imagen in enumerate(imagenes):
+            if imagen.url not in urls_actuales:
+                await cls._at(
+                    f"imagenes -> {index}",
+                    ImagenService.validate_upload_url(db_session, imagen.url, settings),
+                )
+
+    @staticmethod
+    async def _apply_imagenes(
+        db_session: AsyncSession,
+        producto_color: ProductoColor,
+        actuales: Sequence[Imagen],
+        imagenes: Sequence[ImagenDetailCreate],
+        actor_id: UUID,
+        now: datetime,
+    ) -> tuple[bool, dict[str, str]]:
+        """
+        Reemplaza la galería emparejando por url. Devuelve si hubo cambios y la
+        carpeta de Cloudinary de cada imagen nueva, para confirmarla tras el commit.
+        """
+        repository = ImagenRepository(db_session)
+        por_url = {imagen.url: imagen for imagen in actuales}
+        enviadas = {imagen.url for imagen in imagenes}
+        quitadas = [imagen.id for imagen in actuales if imagen.url not in enviadas]
+        await repository.soft_delete_by_ids(quitadas, actor_id, now)
+
+        changed = bool(quitadas)
+        folder = ImagenService.folder_for(producto_color.producto_id, producto_color.id)
+        destinations: dict[str, str] = {}
+        for posicion, imagen in enumerate(imagenes):
+            actual = por_url.get(imagen.url)
+            if actual is None:
+                # Dentro de un mismo tipo, la galería se ordena por created_at:
+                # cada imagen nueva recibe un instante distinto para conservar
+                # el orden enviado aunque el reloj repita el mismo instante.
+                created_at = now + timedelta(microseconds=posicion)
+                repository.add(
+                    Imagen(
+                        producto_color_id=producto_color.id,
+                        **imagen.model_dump(),
+                        created_at=created_at,
+                        created_by=actor_id,
+                        updated_at=created_at,
+                        updated_by=actor_id,
+                    )
+                )
+                destinations[imagen.url] = folder
+                changed = True
+            elif actual.tipo != imagen.tipo:
+                actual.tipo = imagen.tipo
+                actual.updated_at = now
+                actual.updated_by = actor_id
+                changed = True
+        return changed, destinations
+
+    @staticmethod
+    def _codigo_final(fila: SkuDetailUpdate, actual: Sku | None) -> str | None:
+        """Código de barras que tendrá la fila: en un SKU existente, solo cambia si se envía."""
+        if actual is None or "codigo_barras" in fila.model_fields_set:
+            return fila.codigo_barras
+        return actual.codigo_barras
+
+    @staticmethod
+    def _intercambio(field_name: str) -> AppException:
+        message = (
+            "Otro SKU de este color tiene ese valor y también lo cambia en esta "
+            "petición; haz el intercambio en dos guardados."
+        )
+        return AppException(message, 422, ErrorCode.VALIDATION_ERROR, {field_name: message})
+
+    @classmethod
+    async def _validate_skus(
+        cls,
+        db_session: AsyncSession,
+        producto_color_id: UUID,
+        actuales: Sequence[Sku],
+        data: ProductoColorUpdate,
+    ) -> None:
+        """
+        Valida las filas con las mismas reglas que los create y PATCH
+        individuales del SKU, sobre el estado final del color: las tallas y los
+        códigos que liberan los SKUs eliminados quedan disponibles.
+        """
+        por_id = {sku.id: sku for sku in actuales}
+        eliminar = set(data.sku_ids_eliminar or [])
+        ajenos = [str(sku_id) for sku_id in data.sku_ids_eliminar or [] if sku_id not in por_id]
+        if ajenos:
+            message = "Estos SKUs no existen o no pertenecen al color: " + ", ".join(ajenos)
+            raise cls._invalid_reference("sku_ids_eliminar", message)
+
+        filas = data.skus or []
+        restantes = [sku for sku in actuales if sku.id not in eliminar]
+        talla_de = {sku.talla_id: sku for sku in restantes}
+        codigo_de = {sku.codigo_barras: sku for sku in restantes if sku.codigo_barras is not None}
+        fila_de = {fila.id: fila for fila in filas if fila.id is not None}
+
+        sku_repository = SkuRepository(db_session)
+        tallas_validas: set[UUID] = set()
+        for index, fila in enumerate(filas):
+            path = f"skus -> {index}"
+            actual = None
+            if fila.id is not None:
+                actual = por_id.get(fila.id)
+                if actual is None:
+                    raise cls._invalid_reference(
+                        f"{path} -> id", "El SKU no existe o no pertenece a este color."
+                    )
+
+            if actual is None or fila.talla_id != actual.talla_id:
+                if fila.talla_id not in tallas_validas:
+                    await cls._at(path, SkuService.validate_talla(db_session, fila.talla_id))
+                    tallas_validas.add(fila.talla_id)
+                titular = talla_de.get(fila.talla_id)
+                if titular is not None and titular is not actual:
+                    otra = fila_de.get(titular.id)
+                    if otra is not None and otra.talla_id != titular.talla_id:
+                        raise cls._intercambio(f"{path} -> talla_id")
+                    raise cls._with_path(path, SkuService.duplicate_talla())
+
+            codigo = cls._codigo_final(fila, actual)
+            if codigo is not None and (actual is None or codigo != actual.codigo_barras):
+                titular = codigo_de.get(codigo)
+                if titular is not None and titular is not actual:
+                    otra = fila_de.get(titular.id)
+                    if otra is not None and cls._codigo_final(otra, titular) != codigo:
+                        raise cls._intercambio(f"{path} -> codigo_barras")
+                    raise cls._with_path(path, SkuService.duplicate_codigo_barras())
+                existente = await sku_repository.get_active_by_codigo_barras(codigo)
+                # Un código de este mismo color lo resuelven las reglas anteriores
+                # (o queda libre porque su SKU se elimina en esta petición).
+                if existente is not None and existente.producto_color_id != producto_color_id:
+                    raise cls._with_path(path, SkuService.duplicate_codigo_barras())
+
+            if actual is not None:
+                try:
+                    SkuService.replace_precio(actual.precio, fila.precio)
+                except AppException as error:
+                    raise cls._with_path(path, error) from error
+
+    @staticmethod
+    async def _apply_skus(
+        db_session: AsyncSession,
+        producto_color_id: UUID,
+        actuales: Sequence[Sku],
+        data: ProductoColorUpdate,
+        actor_id: UUID,
+        now: datetime,
+    ) -> bool:
+        """
+        Aplica las filas ya validadas: primero elimina, para liberar tallas y
+        códigos, después actualiza y al final crea. Devuelve si hubo cambios.
+        """
+        repository = SkuRepository(db_session)
+        eliminados = await repository.soft_delete_by_ids(data.sku_ids_eliminar or [], actor_id, now)
+        changed = eliminados > 0
+
+        por_id = {sku.id: sku for sku in actuales}
+        for fila in data.skus or []:
+            if fila.id is None:
+                repository.add(
+                    Sku(
+                        producto_color_id=producto_color_id,
+                        **fila.model_dump(exclude={"id", "precio", "stock"}),
+                        precio=SkuService.precio_json(fila.precio),
+                        stock=SkuService.stock_json(fila.stock or SkuStockInput()),
+                        created_by=actor_id,
+                        updated_by=actor_id,
+                    )
+                )
+                changed = True
+                continue
+
+            sku = por_id[fila.id]
+            enviados = fila.model_fields_set & {"talla_id", "codigo_barras", "is_visible"}
+            cambios = {
+                field_name: value
+                for field_name, value in fila.model_dump(include=enviados).items()
+                if getattr(sku, field_name) != value
+            }
+            precio = SkuService.replace_precio(sku.precio, fila.precio)
+            if precio != sku.precio:
+                cambios["precio"] = precio
+            if cambios:
+                for field_name, value in cambios.items():
+                    setattr(sku, field_name, value)
+                sku.updated_at = now
+                sku.updated_by = actor_id
+                changed = True
+        return changed
 
 
     @staticmethod

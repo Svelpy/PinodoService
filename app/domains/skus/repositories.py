@@ -73,6 +73,49 @@ class SkuRepository:
         result = await self.db_session.execute(statement)
         return result.scalar_one_or_none()
 
+    async def list_active_by_producto_color(
+        self,
+        producto_color_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> list[Sku]:
+        """
+        SKUs activos de un color, ordenados por id: el mismo orden con que las
+        ventas bloquean SKUs, para que dos bloqueos no se esperen mutuamente.
+        """
+        statement = select(Sku).where(
+            Sku.producto_color_id == producto_color_id,
+            Sku.is_deleted.is_(False),
+        )
+        if for_update:
+            statement = statement.with_for_update()
+
+        result = await self.db_session.execute(statement.order_by(Sku.id))
+        return list(result.scalars().all())
+
+    async def soft_delete_by_ids(
+        self,
+        sku_ids: Sequence[UUID],
+        actor_id: UUID,
+        now: datetime,
+    ) -> int:
+        """Elimina lógicamente los SKUs activos indicados. Devuelve cuántos marcó."""
+        if not sku_ids:
+            return 0
+        result = await self.db_session.execute(
+            update(Sku)
+            .where(Sku.id.in_(sku_ids), Sku.is_deleted.is_(False))
+            .values(
+                is_deleted=True,
+                deleted_at=now,
+                deleted_by=actor_id,
+                updated_at=now,
+                updated_by=actor_id,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        return result.rowcount
+
     async def soft_delete_by_producto_color_ids(
         self,
         producto_color_ids: Sequence[UUID],

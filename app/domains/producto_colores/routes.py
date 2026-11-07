@@ -108,10 +108,20 @@ async def get_producto_color_audit(
     response_model=ProductoColorDetail,
     summary="Actualizar color de producto",
     description=(
-        "Solo cambia la visibilidad. El color y el producto no se pueden "
-        "cambiar: un color equivocado se elimina y se vuelve a crear."
+        "Edita el color con sus imágenes y SKUs en una transacción, con el mismo "
+        "body que la creación; lo que se omite no cambia. Cambiar color_id "
+        "corrige la etiqueta del color sin tocar sus imágenes, SKUs ni stock; "
+        "el producto no puede tener ya ese color (409). "
+        "imagenes reemplaza la galería emparejando por url ([] quita todas); las "
+        "nuevas se suben antes con POST /imagenes/uploads. En skus, una fila con "
+        "id actualiza ese SKU (solo los campos enviados; precio completo) y una "
+        "sin id crea uno nuevo; un SKU que no se envía no cambia. Las filas con "
+        "id no aceptan stock: se ajusta con PATCH /skus/{id}. sku_ids_eliminar "
+        "elimina SKUs del color y libera su talla y su código de barras para "
+        "las filas de la misma petición. Responde la ficha del color, igual que "
+        "GET /producto-colores/{id}."
     ),
-    responses=_error_responses(401, 403, 404, 422, 500),
+    responses=_error_responses(401, 403, 404, 409, 422, 500),
 )
 async def update_producto_color(
     producto_color_id: UUID,
@@ -128,6 +138,7 @@ async def update_producto_color(
         producto_color_id,
         data,
         current_user.id,
+        settings,
     )
     return ProductoColorService.detail(producto_color, settings)
 

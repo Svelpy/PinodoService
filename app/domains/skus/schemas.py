@@ -260,6 +260,46 @@ class SkuCreate(SkuDetailCreate):
     )
 
 
+class SkuDetailUpdate(SkuDetailCreate):
+    """
+    Fila de la tabla de tallas en PATCH /producto-colores/{id}: la misma fila
+    del formulario de creación, más el id de las que ya existen.
+
+    - Sin id: crea un SKU nuevo, con las mismas reglas que SkuDetailCreate;
+      stock es opcional y vale 0 si se omite.
+    - Con id: actualiza ese SKU. Solo cambian los campos enviados; precio se
+      envía completo y reemplaza al anterior. No admite stock: el de un SKU que
+      ya existe se ajusta con PATCH /skus/{id}, para no pisar lo que las ventas
+      descontaron mientras el formulario estaba abierto.
+
+    Por esa exclusión, el ejemplo muestra una fila existente y omite stock.
+    """
+
+    stock: SkuStockInput | None = Field(default=None)
+    id: UUID | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def validate_stock_solo_en_nuevas(self) -> "SkuDetailUpdate":
+        if self.id is not None and self.stock is not None:
+            raise ValueError(
+                "El stock de un SKU existente no se cambia aquí; usa PATCH /skus/{id}."
+            )
+        return self
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "talla_id": "99999999-9999-4999-8999-999999999999",
+                "codigo_barras": "8412345678905",
+                "is_visible": True,
+                "precio": {"normal": 29.95, "rebajado": 19.95, "rebaja_hasta": "2026-12-31"},
+                "id": "11111111-1111-4111-8111-111111111111",
+            }
+        },
+    )
+
+
 class SkuUpdate(BaseModel):
     """
     producto_color_id es la foreign key de dueño y no se modifica.

@@ -41,7 +41,7 @@ class SkuService:
     """Reglas de negocio de los SKUs (color de producto × talla)."""
 
     @staticmethod
-    def _duplicate_talla() -> AppException:
+    def duplicate_talla() -> AppException:
         return AppException(
             "El color del producto ya tiene un SKU con esa talla.",
             409,
@@ -50,7 +50,7 @@ class SkuService:
         )
 
     @staticmethod
-    def _duplicate_codigo_barras() -> AppException:
+    def duplicate_codigo_barras() -> AppException:
         return AppException(
             "El código de barras ya está registrado.",
             409,
@@ -74,9 +74,9 @@ class SkuService:
             )
 
         if constraint_name == "uq_skus_color_talla":
-            return cls._duplicate_talla()
+            return cls.duplicate_talla()
         if constraint_name == "uq_skus_codigo_barras":
-            return cls._duplicate_codigo_barras()
+            return cls.duplicate_codigo_barras()
 
         return AppException(
             "Los datos del SKU entran en conflicto con un registro existente.",
@@ -127,21 +127,33 @@ class SkuService:
             # Quitar la rebaja quita también su fecha.
             changes["rebaja_hasta"] = None
         precio = cls._merged(SkuPrecio, "precio", {**current, **changes})
+        if "rebajado" in changes or "rebaja_hasta" in changes:
+            cls._validate_rebaja_no_vencida(precio)
+        return precio
 
-        # Al tocar la rebaja, la fecha que se conserva no puede haber vencido:
-        # si no, la rebaja nueva no se aplicaría nunca y nadie lo notaría.
-        toca_rebaja = "rebajado" in changes or "rebaja_hasta" in changes
-        if (
-            toca_rebaja
-            and precio.rebaja_hasta is not None
-            and precio.rebaja_hasta < cls.local_today(get_settings())
-        ):
+    @classmethod
+    def _validate_rebaja_no_vencida(cls, precio: SkuPrecio) -> None:
+        """
+        Al tocar la rebaja, su fecha de fin no puede haber pasado: si no, la
+        rebaja nueva no se aplicaría nunca y nadie lo notaría.
+        """
+        if precio.rebaja_hasta is not None and precio.rebaja_hasta < cls.local_today(get_settings()):
             message = (
                 "La fecha de fin de la rebaja ya pasó; envía una nueva "
                 "rebaja_hasta o null para que no venza."
             )
             raise AppException(message, 422, ErrorCode.VALIDATION_ERROR, {"precio": message})
-        return precio
+
+    @classmethod
+    def replace_precio(cls, current: dict[str, Any], precio: SkuPrecio) -> dict[str, Any]:
+        """
+        Precio que reemplaza completo al guardado, como lo envía el formulario
+        del color. Aplica la misma regla de rebaja vencida que el PATCH del SKU.
+        """
+        nuevo = cls.precio_json(precio)
+        if any(nuevo[key] != current.get(key) for key in ("rebajado", "rebaja_hasta")):
+            cls._validate_rebaja_no_vencida(precio)
+        return nuevo
 
     @classmethod
     def _merge_stock(cls, current: dict[str, Any], update: SkuStockUpdate) -> SkuStockInput:
@@ -171,7 +183,7 @@ class SkuService:
             exclude_id=exclude_id,
         )
         if existing is not None:
-            raise cls._duplicate_talla()
+            raise cls.duplicate_talla()
 
     @classmethod
     async def validate_unique_codigo_barras(
@@ -185,7 +197,7 @@ class SkuService:
             exclude_id=exclude_id,
         )
         if existing is not None:
-            raise cls._duplicate_codigo_barras()
+            raise cls.duplicate_codigo_barras()
 
     @staticmethod
     async def get(

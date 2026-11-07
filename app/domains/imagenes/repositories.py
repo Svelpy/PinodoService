@@ -34,6 +34,40 @@ class ImagenRepository:
         result = await self.db_session.execute(statement)
         return result.scalar_one_or_none()
 
+    async def list_active_by_producto_color(self, producto_color_id: UUID) -> list[Imagen]:
+        result = await self.db_session.execute(
+            select(Imagen)
+            .where(
+                Imagen.producto_color_id == producto_color_id,
+                Imagen.is_deleted.is_(False),
+            )
+            .order_by(*GALERIA_ORDER)
+        )
+        return list(result.scalars().all())
+
+    async def soft_delete_by_ids(
+        self,
+        imagen_ids: Sequence[UUID],
+        actor_id: UUID,
+        now: datetime,
+    ) -> int:
+        """Elimina lógicamente las imágenes activas indicadas. Devuelve cuántas marcó."""
+        if not imagen_ids:
+            return 0
+        result = await self.db_session.execute(
+            update(Imagen)
+            .where(Imagen.id.in_(imagen_ids), Imagen.is_deleted.is_(False))
+            .values(
+                is_deleted=True,
+                deleted_at=now,
+                deleted_by=actor_id,
+                updated_at=now,
+                updated_by=actor_id,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        return result.rowcount
+
     async def soft_delete_by_producto_color_ids(
         self,
         producto_color_ids: Sequence[UUID],

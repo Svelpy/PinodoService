@@ -165,3 +165,52 @@ def test_delete_responde_204(
 
     assert response.status_code == 204
     service.assert_awaited_once_with(db_session, producto_color_id, current_user.id)
+
+
+def test_patch_recibe_el_body_del_create_y_responde_el_detail(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, current_user, db_session = route_context
+    sku_id = uuid4()
+
+    with patch.object(
+        ProductoColorService,
+        "update",
+        new=AsyncMock(return_value=_detail()),
+    ) as service:
+        response = client.patch(
+            f"/producto-colores/{uuid4()}",
+            json={
+                "is_visible": False,
+                "skus": [{"id": str(sku_id), "talla_id": str(uuid4()), "precio": {"normal": 20}}],
+                "sku_ids_eliminar": [str(uuid4())],
+            },
+        )
+
+    assert response.status_code == 200
+    data = service.await_args.args[2]
+    assert data.skus[0].id == sku_id
+    assert service.await_args.args[3] == current_user.id
+    assert "skus" in response.json() and "imagenes" in response.json()
+
+
+def test_patch_rechaza_stock_en_un_sku_existente(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, _, _ = route_context
+
+    response = client.patch(
+        f"/producto-colores/{uuid4()}",
+        json={
+            "skus": [
+                {
+                    "id": str(uuid4()),
+                    "talla_id": str(uuid4()),
+                    "precio": {"normal": 20},
+                    "stock": {"cantidad": 3},
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422

@@ -33,8 +33,13 @@ def test_producto_color_update_rechaza_visibilidad_null() -> None:
         ProductoColorUpdate.model_validate({"is_visible": None})
 
 
-def test_producto_color_update_solo_admite_visibilidad() -> None:
-    assert set(ProductoColorUpdate.model_fields) == {"is_visible"}
+def test_producto_color_update_usa_el_body_del_create_mas_eliminados() -> None:
+    from app.domains.producto_colores.schemas import ProductoColorDetailCreate
+
+    assert list(ProductoColorUpdate.model_fields) == [
+        *ProductoColorDetailCreate.model_fields,
+        "sku_ids_eliminar",
+    ]
 
 
 def test_producto_color_response_desde_modelo() -> None:
@@ -99,3 +104,75 @@ def test_producto_color_rechaza_codigo_de_barras_repetido() -> None:
         ProductoColorDetailCreate.model_validate(
             {"color_id": str(uuid4()), "skus": [{**sku, "talla_id": str(uuid4())}, {**sku, "talla_id": str(uuid4())}]}
         )
+
+
+# --- PATCH con imágenes y SKUs ----------------------------------------------
+
+from app.domains.skus.schemas import SkuDetailUpdate  # noqa: E402
+
+PRECIO = {"normal": 29.95}
+
+
+def test_ejemplos_del_patch_validan_su_schema() -> None:
+    for schema in (ProductoColorUpdate, SkuDetailUpdate):
+        example = schema.model_config["json_schema_extra"]["example"]
+        schema.model_validate(example)
+        assert list(example) == [name for name in schema.model_fields if name in example]
+
+
+def test_patch_acepta_un_body_vacio() -> None:
+    assert ProductoColorUpdate.model_validate({}).model_fields_set == set()
+
+
+@pytest.mark.parametrize("campo", ["color_id", "is_visible", "imagenes", "skus", "sku_ids_eliminar"])
+def test_patch_rechaza_null(campo: str) -> None:
+    with pytest.raises(ValidationError):
+        ProductoColorUpdate.model_validate({campo: None})
+
+
+def test_fila_existente_no_admite_stock_y_la_nueva_si() -> None:
+    with pytest.raises(ValidationError, match="PATCH /skus"):
+        SkuDetailUpdate.model_validate(
+            {"id": str(uuid4()), "talla_id": str(uuid4()), "precio": PRECIO, "stock": {"cantidad": 1}}
+        )
+
+    nueva = SkuDetailUpdate.model_validate({"talla_id": str(uuid4()), "precio": PRECIO})
+    assert nueva.id is None and nueva.stock is None
+    existente = SkuDetailUpdate.model_validate({"id": str(uuid4()), "talla_id": str(uuid4()), "precio": PRECIO})
+    # Solo lo enviado cambia en un SKU existente.
+    assert "codigo_barras" not in existente.model_fields_set
+
+
+def test_patch_rechaza_editar_y_eliminar_el_mismo_sku() -> None:
+    sku_id = str(uuid4())
+    with pytest.raises(ValidationError, match="editarse y eliminarse"):
+        ProductoColorUpdate.model_validate(
+            {
+                "skus": [{"id": sku_id, "talla_id": str(uuid4()), "precio": PRECIO}],
+                "sku_ids_eliminar": [sku_id],
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("filas", "mensaje"),
+    [
+        ([{"id": "A", "talla": "1"}, {"id": "A", "talla": "2"}], "SKU no puede repetirse"),
+        ([{"talla": "1"}, {"talla": "1"}], "talla no puede repetirse"),
+    ],
+)
+def test_patch_rechaza_filas_repetidas(filas: list[dict[str, str]], mensaje: str) -> None:
+    ids = {"A": str(uuid4())}
+    tallas = {"1": str(uuid4()), "2": str(uuid4())}
+    skus = [
+        {**({"id": ids[f["id"]]} if "id" in f else {}), "talla_id": tallas[f["talla"]], "precio": PRECIO}
+        for f in filas
+    ]
+    with pytest.raises(ValidationError, match=mensaje):
+        ProductoColorUpdate.model_validate({"skus": skus})
+
+
+def test_patch_quita_ids_eliminados_repetidos() -> None:
+    sku_id = uuid4()
+    data = ProductoColorUpdate.model_validate({"sku_ids_eliminar": [str(sku_id), str(sku_id)]})
+    assert data.sku_ids_eliminar == [sku_id]
