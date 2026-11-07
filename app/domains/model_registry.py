@@ -13,6 +13,8 @@ from app.domains.secciones.models import Seccion
 from app.domains.skus.models import Sku
 from app.domains.tallas.models import Talla
 from app.domains.usuarios.models import Usuario
+from app.domains.venta_items.models import VentaItem
+from app.domains.ventas.models import Venta
 
 __all__ = [
     "AuthSession",
@@ -28,4 +30,6 @@ __all__ = [
     "Sku",
     "Talla",
     "Usuario",
+    "Venta",
+    "VentaItem",
 ]

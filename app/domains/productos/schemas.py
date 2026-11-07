@@ -76,7 +76,7 @@ class ProductoDetailCreate(ProductoCreate):
     @field_validator("categoria_ids")
     @classmethod
     def remove_duplicate_categorias(cls, value: list[UUID]) -> list[UUID]:
-        # Igual que PUT /productos/{id}/categorias: se conserva la primera aparición.
+        # Se conserva la primera aparición.
         return list(dict.fromkeys(value))
 
     @field_validator("colores")
@@ -113,12 +113,21 @@ class ProductoDetailCreate(ProductoCreate):
 
 
 class ProductoUpdate(BaseModel):
+    """
+    categoria_ids reemplaza las categorías del producto: conserva las que
+    siguen, quita las que faltan y añade las nuevas. Si se omite, no cambian, salvo que cambie la
+    sección: entonces se quitan todas, porque pertenecen a la anterior. Enviado
+    junto con seccion_id, se valida contra la nueva sección, y así se cambia de
+    sección y de categorías en una sola transacción.
+    """
+
     seccion_id: UUID | None = Field(default=None)
     nombre: str | None = Field(default=None, min_length=1, max_length=200)
     descripcion: str | None = Field(default=None, min_length=1)
     cuidados: str | None = Field(default=None, min_length=1)
     composicion: str | None = Field(default=None, min_length=1)
     is_visible: bool | None = Field(default=None)
+    categoria_ids: list[UUID] | None = Field(default=None, max_length=100)
 
     @field_validator("seccion_id")
     @classmethod
@@ -148,6 +157,19 @@ class ProductoUpdate(BaseModel):
             raise ValueError("La visibilidad no puede ser null.")
         return validator_boolean(value)
 
+    @field_validator("categoria_ids", mode="before")
+    @classmethod
+    def validate_categoria_ids_not_null(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("Las categorías no pueden ser null; usa [] para quitarlas todas.")
+        return value
+
+    @field_validator("categoria_ids")
+    @classmethod
+    def remove_duplicate_categorias(cls, value: list[UUID]) -> list[UUID]:
+        # Se conserva la primera aparición.
+        return list(dict.fromkeys(value))
+
     model_config = ConfigDict(
         extra="forbid",
         json_schema_extra={
@@ -158,6 +180,7 @@ class ProductoUpdate(BaseModel):
                 "cuidados": "Lavar a máquina a 30 °C. No usar secadora.",
                 "composicion": "100 % algodón",
                 "is_visible": True,
+                "categoria_ids": ["44444444-4444-4444-8444-444444444444"],
             }
         },
     )

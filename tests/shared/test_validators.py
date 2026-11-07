@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 
 import pytest
 
@@ -7,6 +8,8 @@ from app.shared.services.validators import (
     validator_boolean,
     validator_date,
     validator_hex_color,
+    validator_non_negative_money,
+    validator_positive_money,
     validator_schedule,
     validator_social_links,
 )
@@ -104,3 +107,23 @@ def test_social_links_normaliza_red() -> None:
 def test_social_links_rechaza_invalidos(value: object) -> None:
     with pytest.raises(ValueError):
         validator_social_links(value)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(0, Decimal("0")), ("0.00", Decimal("0.00")), (4.8, Decimal("4.8")), (" 19.95 ", Decimal("19.95"))],
+)
+def test_non_negative_money_acepta_cero_y_positivos(value: object, expected: Decimal) -> None:
+    assert validator_non_negative_money(value) == expected
+
+
+@pytest.mark.parametrize("value", [-1, "-0.01", "", "abc", "NaN", True, None])
+def test_non_negative_money_rechaza_invalidos(value: object) -> None:
+    with pytest.raises(ValueError):
+        validator_non_negative_money(value)
+
+
+@pytest.mark.parametrize("value", [0, "0.00", -5])
+def test_positive_money_rechaza_cero_y_negativos(value: object) -> None:
+    with pytest.raises(ValueError):
+        validator_positive_money(value)

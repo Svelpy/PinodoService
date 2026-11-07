@@ -147,9 +147,12 @@ async def get_producto_audit(
     response_model=ProductoDetail,
     summary="Actualizar producto",
     description=(
-        "Los textos opcionales aceptan null para borrarlos. Cambiar de sección "
-        "quita todas sus categorías, porque pertenecen a la sección anterior; "
-        "las nuevas se asignan después con PUT /productos/{id}/categorias."
+        "Los textos opcionales aceptan null para borrarlos. categoria_ids "
+        "reemplaza las categorías "
+        "([] quita todas); si se omite, no cambian. Junto con seccion_id se "
+        "validan contra la nueva sección, y ambos cambian en una transacción. "
+        "Cambiar de sección sin enviar categoria_ids quita todas las categorías, "
+        "porque pertenecen a la sección anterior."
     ),
     responses=_error_responses(401, 403, 404, 409, 422, 500),
 )

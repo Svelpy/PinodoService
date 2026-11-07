@@ -20,12 +20,12 @@ ROLE_PERMISSIONS: dict[Role, dict[Module, frozenset[Action]]] = {
         Module.SECCION: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.CATEGORIA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.PRODUCTO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.CATEGORIA_PRODUCTO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.COLOR: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.PRODUCTO_COLOR: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.IMAGEN: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.TALLA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.SKU: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
+        Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),  # DELETE = anular una venta confirmada
     },
     # Dueño de la tienda.
     Role.OWNER: {
@@ -34,12 +34,12 @@ ROLE_PERMISSIONS: dict[Role, dict[Module, frozenset[Action]]] = {
         Module.SECCION: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.CATEGORIA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.PRODUCTO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.CATEGORIA_PRODUCTO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.COLOR: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.PRODUCTO_COLOR: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.IMAGEN: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.TALLA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.SKU: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
+        Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),  # DELETE = anular una venta confirmada
     },
     # Encargado que administra la tienda por el dueño.
     Role.ADMIN: {
@@ -48,26 +48,26 @@ ROLE_PERMISSIONS: dict[Role, dict[Module, frozenset[Action]]] = {
         Module.SECCION: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.AUDIT}),  # estructura de la tienda: oculta con is_visible
         Module.CATEGORIA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.PRODUCTO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.CATEGORIA_PRODUCTO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.COLOR: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.PRODUCTO_COLOR: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.IMAGEN: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.TALLA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.SKU: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
+        Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),  # DELETE = anular una venta confirmada
     },
-    # Atiende la caja: consulta el catálogo, precios y stock sin modificarlos.
+    # Atiende la caja: registra ventas y consulta el catálogo, precios y stock sin modificarlos.
     Role.CAJERO: {
         Module.USUARIO: frozenset(),  # no gestiona usuarios; su perfil lo edita desde /me
         Module.CONFIG: frozenset({Action.READ}),  # solo consulta los datos de la tienda
         Module.SECCION: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
         Module.CATEGORIA: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
         Module.PRODUCTO: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
-        Module.CATEGORIA_PRODUCTO: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
         Module.COLOR: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
         Module.PRODUCTO_COLOR: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
         Module.IMAGEN: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
         Module.TALLA: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
         Module.SKU: frozenset({Action.READ}),  # consulta precios y stock; no los ajusta
+        Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),  # cobra y cancela pendientes; anular una venta confirmada (DELETE) y la auditoría quedan para roles superiores
     },
 }
 
@@ -80,6 +80,13 @@ ROLE_LEVEL: dict[Role, int] = {
     Role.OWNER: 3,
     Role.SUPERADMIN: 4,
 }
+
+
+# Alcance de las ventas (segunda puerta, AGENTS.md §14): estos roles ven y
+# gestionan todas las ventas; los de VENTA_OWN_SCOPE_ROLES, solo las que
+# registraron. Un rol ausente de ambos grupos no ve ninguna.
+VENTA_GLOBAL_SCOPE_ROLES: frozenset[Role] = frozenset({Role.SUPERADMIN, Role.OWNER, Role.ADMIN})
+VENTA_OWN_SCOPE_ROLES: frozenset[Role] = frozenset({Role.CAJERO})
 
 
 def has_permission(role: Role, module: Module, action: Action) -> bool:

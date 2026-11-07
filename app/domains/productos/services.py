@@ -295,32 +295,59 @@ class ProductoService:
         settings: Settings,
     ) -> ProductoDetail:
         """
-        Actualiza un producto. Al cambiar de sección se quitan todas sus
-        categorías, en la misma transacción, porque pertenecen a la sección
-        anterior.
+        Actualiza un producto y, si llega categoria_ids, reemplaza sus
+        categorías en la misma transacción, validadas contra la sección
+        resultante. Al cambiar de sección sin enviar categoria_ids se quitan
+        todas, porque pertenecen a la sección anterior.
+
+        Cambiar solo las categorías modifica los enlaces, no el producto; si son
+        las mismas, no hay commit.
         """
         changes = data.model_dump(exclude_unset=True)
-        producto = await cls.get(db_session, producto_id, for_update=bool(changes))
-        if not changes:
+        categoria_ids: list[UUID] | None = changes.pop("categoria_ids", None)
+        producto = await cls.get(
+            db_session,
+            producto_id,
+            for_update=bool(changes) or categoria_ids is not None,
+        )
+        if not changes and categoria_ids is None:
             return await cls.get_detail(db_session, producto_id, settings)
 
         now = utc_now()
-        categorias_quitadas = 0
-        if changes.get("seccion_id", producto.seccion_id) != producto.seccion_id:
-            await cls._validate_seccion(db_session, changes["seccion_id"])
+        seccion_id = changes.get("seccion_id", producto.seccion_id)
+        if seccion_id != producto.seccion_id:
+            await cls._validate_seccion(db_session, seccion_id)
+
+        categorias_anadidas = categorias_quitadas = 0
+        if categoria_ids is not None:
+            categorias_anadidas, categorias_quitadas = await CategoriaProductoService.apply_categorias(
+                db_session, producto.id, seccion_id, categoria_ids, actor_id, now
+            )
+        elif seccion_id != producto.seccion_id:
             categorias_quitadas = await CategoriaProductoRepository(
                 db_session
             ).soft_delete_by_producto(producto.id, actor_id, now)
 
-        for field_name, value in changes.items():
-            setattr(producto, field_name, value)
-        producto.updated_at = now
-        producto.updated_by = actor_id
-        await cls._commit(db_session, producto)
+        if not changes and not (categorias_anadidas or categorias_quitadas):
+            return await cls.get_detail(db_session, producto_id, settings)
+
+        if changes:
+            for field_name, value in changes.items():
+                setattr(producto, field_name, value)
+            producto.updated_at = now
+            producto.updated_by = actor_id
+        try:
+            await cls._commit(db_session, producto)
+        except AppException as error:
+            # Con categorías, el único conflicto posible es otro cambio simultáneo de ellas.
+            if categoria_ids is not None:
+                raise CategoriaProductoService.concurrent_change() from error
+            raise
 
         logger.info(
-            "Producto actualizado: producto_id=%s categorias_quitadas=%s actor_id=%s",
+            "Producto actualizado: producto_id=%s categorias_anadidas=%s categorias_quitadas=%s actor_id=%s",
             producto.id,
+            categorias_anadidas,
             categorias_quitadas,
             actor_id,
         )

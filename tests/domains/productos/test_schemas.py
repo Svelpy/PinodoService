@@ -109,3 +109,14 @@ def test_producto_detail_embebe_el_agregado_completo_sin_volver_al_dueno() -> No
     assert color["skus"][0]["precio_vigente"] == 29.95
     assert "producto" not in color
     assert color["producto_id"] == data["id"]
+
+
+def test_producto_update_categorias_quita_duplicados_y_rechaza_null() -> None:
+    categoria_id = uuid4()
+
+    data = ProductoUpdate.model_validate({"categoria_ids": [str(categoria_id), str(categoria_id)]})
+
+    assert data.categoria_ids == [categoria_id]
+    assert ProductoUpdate.model_validate({"categoria_ids": []}).categoria_ids == []
+    with pytest.raises(ValidationError):
+        ProductoUpdate.model_validate({"categoria_ids": None})

@@ -1,0 +1,450 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID, uuid4
+
+import pytest
+
+from app.core.config import get_settings
+from app.domains.auth.schemas import CurrentUser
+from app.domains.skus.models import Sku
+from app.domains.venta_items.models import VentaItem
+from app.domains.venta_items.repositories import SkuParaVenta, VentaItemRepository
+from app.domains.ventas.models import Venta
+from app.domains.ventas.repositories import VentaRepository, VentaScope
+from app.domains.ventas.schemas import VentaCreate, VentaEstadoUpdate, VentaItemsUpdate
+from app.domains.ventas.services import VentaService
+from app.shared.enums import EstadoVenta, Role
+from app.shared.errors.exceptions import AppException
+
+
+def _session() -> MagicMock:
+    session = MagicMock()
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+    return session
+
+
+def _actor(rol: Role = Role.CAJERO) -> CurrentUser:
+    return CurrentUser(id=uuid4(), rol=rol)
+
+
+def _sku_venta(
+    *,
+    normal: float = 29.95,
+    rebajado: float | None = None,
+    cantidad: int = 10,
+    nombre: str = "Camisa Oxford",
+) -> SkuParaVenta:
+    sku = Sku(
+        producto_color_id=uuid4(),
+        talla_id=uuid4(),
+        codigo_barras="8412345678905",
+        precio={
+            "normal": normal,
+            "rebajado": rebajado,
+            "rebaja_hasta": "2099-12-31" if rebajado is not None else None,
+        },
+        stock={"cantidad": cantidad, "minimo": 2, "actualizado": None},
+    )
+    return SkuParaVenta(sku, nombre, "Azul marino", "M")
+
+
+def _item(sku_venta: SkuParaVenta, venta: Venta, cantidad: int = 1) -> VentaItem:
+    precio = Decimal(str(sku_venta.sku.precio["normal"]))
+    return VentaItem(
+        venta_id=venta.id,
+        sku_id=sku_venta.sku.id,
+        cantidad=cantidad,
+        precio_normal=precio,
+        precio_unitario=precio,
+        descuento_unitario=Decimal("0"),
+        subtotal=precio * cantidad,
+        producto_nombre=sku_venta.producto_nombre,
+        color_nombre=sku_venta.color_nombre,
+        talla_etiqueta=sku_venta.talla_etiqueta,
+        codigo_barras=sku_venta.sku.codigo_barras,
+    )
+
+
+def _venta(estado: EstadoVenta, *skus: tuple[SkuParaVenta, int]) -> Venta:
+    venta = Venta(estado=estado)
+    venta.items = [_item(sku_venta, venta, cantidad) for sku_venta, cantidad in skus]
+    venta.subtotal = sum((item.subtotal for item in venta.items), Decimal("0"))
+    venta.total = venta.subtotal
+    return venta
+
+
+@contextmanager
+def _repos(
+    *,
+    skus: dict[UUID, SkuParaVenta],
+    venta: Venta | None = None,
+) -> Iterator[dict[str, MagicMock]]:
+    with (
+        patch.object(
+            VentaItemRepository,
+            "get_skus_para_venta",
+            new=AsyncMock(side_effect=lambda ids, **_: {i: skus[i] for i in ids if i in skus}),
+        ) as get_skus,
+        patch.object(VentaItemRepository, "add") as add_item,
+        patch.object(VentaItemRepository, "soft_delete_by_ids", new=AsyncMock(return_value=0)) as soft_delete,
+        patch.object(VentaRepository, "add") as add_venta,
+        patch.object(VentaRepository, "get_by_id", new=AsyncMock(return_value=venta)) as get_by_id,
+        patch.object(VentaService, "_reload", new=AsyncMock(side_effect=lambda s, venta_id, a: venta_id)),
+    ):
+        yield {
+            "get_skus": get_skus,
+            "add_item": add_item,
+            "soft_delete": soft_delete,
+            "add_venta": add_venta,
+            "get_by_id": get_by_id,
+        }
+
+
+def _added_items(repos: dict[str, MagicMock]) -> list[VentaItem]:
+    return [call.args[0] for call in repos["add_item"].call_args_list]
+
+
+# ---------------------------------------------------------------- alcance
+
+
+@pytest.mark.parametrize("rol", [Role.SUPERADMIN, Role.OWNER, Role.ADMIN])
+def test_roles_superiores_ven_todas_las_ventas(rol: Role) -> None:
+    assert VentaService._scope_for(_actor(rol)) == VentaScope(all=True)
+
+
+def test_cajero_solo_ve_sus_ventas() -> None:
+    actor = _actor(Role.CAJERO)
+
+    assert VentaService._scope_for(actor) == VentaScope(created_by=actor.id)
+
+
+@pytest.mark.asyncio
+async def test_get_fuera_de_alcance_responde_404() -> None:
+    actor = _actor(Role.CAJERO)
+
+    with _repos(skus={}, venta=None) as repos, pytest.raises(AppException) as error:
+        await VentaService.get(_session(), uuid4(), actor)
+
+    assert error.value.status_code == 404
+    assert repos["get_by_id"].call_args.kwargs["scope"] == VentaScope(created_by=actor.id)
+
+
+# ---------------------------------------------------------------- create
+
+
+@pytest.mark.asyncio
+async def test_create_pendiente_copia_snapshot_y_no_toca_stock() -> None:
+    camisa = _sku_venta(normal=29.95, rebajado=19.95, cantidad=5)
+    actor = _actor()
+    data = VentaCreate.model_validate(
+        {
+            "descuento": "4.90",
+            "items": [{"sku_id": str(camisa.sku.id), "cantidad": 2, "descuento_unitario": "2.50"}],
+        }
+    )
+
+    with _repos(skus={camisa.sku.id: camisa}) as repos:
+        await VentaService.create(_session(), data, actor, get_settings())
+
+    venta = repos["add_venta"].call_args.args[0]
+    [item] = _added_items(repos)
+    assert item.venta_id == venta.id
+    assert item.precio_normal == Decimal("29.95")
+    assert item.precio_unitario == Decimal("19.95")  # rebaja vigente
+    assert item.subtotal == Decimal("34.90")  # (19.95 - 2.50) * 2
+    assert (item.producto_nombre, item.color_nombre, item.talla_etiqueta) == ("Camisa Oxford", "Azul marino", "M")
+    assert item.codigo_barras == "8412345678905"
+    assert venta.subtotal == Decimal("34.90")
+    assert venta.total == Decimal("30.00")
+    assert venta.estado == EstadoVenta.PENDIENTE
+    assert venta.created_by == actor.id
+    assert venta.confirmada_at is None
+    assert camisa.sku.stock["cantidad"] == 5
+    assert repos["get_skus"].call_args.kwargs["for_update"] is False
+
+
+@pytest.mark.asyncio
+async def test_create_conserva_el_orden_de_los_items() -> None:
+    skus = [_sku_venta(nombre=f"Producto {n}") for n in range(5)]
+    data = VentaCreate.model_validate(
+        {"items": [{"sku_id": str(s.sku.id), "cantidad": 1} for s in skus]}
+    )
+
+    with _repos(skus={s.sku.id: s for s in skus}) as repos:
+        await VentaService.create(_session(), data, _actor(), get_settings())
+
+    items = _added_items(repos)
+    assert [item.sku_id for item in items] == [s.sku.id for s in skus]
+    # created_at estrictamente creciente: el orden de lectura es el enviado.
+    assert all(a.created_at < b.created_at for a, b in zip(items, items[1:]))
+
+
+@pytest.mark.asyncio
+async def test_create_confirmada_descuenta_stock() -> None:
+    camisa = _sku_venta(cantidad=5)
+    data = VentaCreate.model_validate(
+        {"estado": "CONFIRMADA", "canal": "TIENDA", "items": [{"sku_id": str(camisa.sku.id), "cantidad": 2}]}
+    )
+
+    with _repos(skus={camisa.sku.id: camisa}) as repos:
+        await VentaService.create(_session(), data, _actor(), get_settings())
+
+    venta = repos["add_venta"].call_args.args[0]
+    assert venta.confirmada_at is not None
+    assert camisa.sku.stock["cantidad"] == 3
+    assert camisa.sku.stock["actualizado"] is not None
+    assert repos["get_skus"].call_args.kwargs["for_update"] is True
+
+
+@pytest.mark.asyncio
+async def test_create_confirmada_sin_stock_suficiente_responde_409_sin_tocar_nada() -> None:
+    camisa = _sku_venta(cantidad=5)
+    pantalon = _sku_venta(cantidad=1, nombre="Pantalón chino")
+    session = _session()
+    data = VentaCreate.model_validate(
+        {
+            "estado": "CONFIRMADA",
+            "items": [
+                {"sku_id": str(camisa.sku.id), "cantidad": 2},
+                {"sku_id": str(pantalon.sku.id), "cantidad": 3},
+            ],
+        }
+    )
+
+    with (
+        _repos(skus={camisa.sku.id: camisa, pantalon.sku.id: pantalon}),
+        pytest.raises(AppException) as error,
+    ):
+        await VentaService.create(session, data, _actor(), get_settings())
+
+    assert error.value.status_code == 409
+    assert "Pantalón chino" in error.value.message
+    assert camisa.sku.stock["cantidad"] == 5
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_con_sku_inexistente_responde_422() -> None:
+    data = VentaCreate.model_validate({"items": [{"sku_id": str(uuid4()), "cantidad": 1}]})
+
+    with _repos(skus={}), pytest.raises(AppException) as error:
+        await VentaService.create(_session(), data, _actor(), get_settings())
+
+    assert error.value.status_code == 422
+    assert "items" in error.value.details
+
+
+@pytest.mark.asyncio
+async def test_create_descuento_mayor_que_subtotal_responde_422() -> None:
+    camisa = _sku_venta(normal=10)
+    data = VentaCreate.model_validate(
+        {"descuento": 11, "items": [{"sku_id": str(camisa.sku.id), "cantidad": 1}]}
+    )
+
+    with _repos(skus={camisa.sku.id: camisa}), pytest.raises(AppException) as error:
+        await VentaService.create(_session(), data, _actor(), get_settings())
+
+    assert error.value.status_code == 422
+    assert "descuento" in error.value.details
+
+
+@pytest.mark.asyncio
+async def test_create_descuento_unitario_mayor_que_precio_responde_422() -> None:
+    camisa = _sku_venta(normal=10)
+    data = VentaCreate.model_validate(
+        {"items": [{"sku_id": str(camisa.sku.id), "cantidad": 1, "descuento_unitario": 10.01}]}
+    )
+
+    with _repos(skus={camisa.sku.id: camisa}), pytest.raises(AppException) as error:
+        await VentaService.create(_session(), data, _actor(), get_settings())
+
+    assert error.value.status_code == 422
+
+
+# ---------------------------------------------------------------- PUT items
+
+
+@pytest.mark.asyncio
+async def test_replace_items_actualiza_elimina_crea_y_rehace_snapshot() -> None:
+    camisa = _sku_venta(normal=29.95)
+    pantalon = _sku_venta(normal=49.90, nombre="Pantalón chino")
+    falda = _sku_venta(normal=39.90, nombre="Falda")
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1), (pantalon, 1))
+    item_camisa, item_pantalon = venta.items
+    # El precio de la camisa cambió desde que se agregó: se rehace el snapshot.
+    camisa.sku.precio = {"normal": 25.00, "rebajado": None, "rebaja_hasta": None}
+    actor = _actor()
+    data = VentaItemsUpdate.model_validate(
+        {
+            "nota": "Cambió el pantalón por una falda.",
+            "items": [
+                {"sku_id": str(camisa.sku.id), "cantidad": 2},
+                {"sku_id": str(falda.sku.id), "cantidad": 1},
+            ],
+        }
+    )
+
+    with _repos(
+        skus={s.sku.id: s for s in (camisa, pantalon, falda)},
+        venta=venta,
+    ) as repos:
+        await VentaService.replace_items(_session(), venta.id, data, actor, get_settings())
+
+    assert item_camisa.cantidad == 2
+    assert item_camisa.precio_unitario == Decimal("25.0")
+    assert item_camisa.subtotal == Decimal("50.0")
+    assert item_camisa.updated_by == actor.id
+    repos["soft_delete"].assert_awaited_once()
+    assert repos["soft_delete"].call_args.args[0] == [item_pantalon.id]
+    [nuevo] = _added_items(repos)
+    assert nuevo.sku_id == falda.sku.id
+    assert venta.subtotal == Decimal("89.90")
+    assert venta.total == Decimal("89.90")
+    assert venta.nota == "Cambió el pantalón por una falda."
+    assert venta.updated_by == actor.id
+
+
+@pytest.mark.parametrize("estado", [EstadoVenta.CONFIRMADA, EstadoVenta.CANCELADA])
+@pytest.mark.asyncio
+async def test_replace_items_solo_en_pendiente(estado: EstadoVenta) -> None:
+    camisa = _sku_venta()
+    venta = _venta(estado, (camisa, 1))
+    data = VentaItemsUpdate.model_validate({"items": [{"sku_id": str(camisa.sku.id), "cantidad": 2}]})
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta), pytest.raises(AppException) as error:
+        await VentaService.replace_items(_session(), venta.id, data, _actor(), get_settings())
+
+    assert error.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_replace_items_rechaza_sku_eliminado() -> None:
+    camisa = _sku_venta()
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1))
+    data = VentaItemsUpdate.model_validate({"items": [{"sku_id": str(camisa.sku.id), "cantidad": 1}]})
+
+    with _repos(skus={}, venta=venta), pytest.raises(AppException) as error:
+        await VentaService.replace_items(_session(), venta.id, data, _actor(), get_settings())
+
+    assert error.value.status_code == 422
+
+
+# ---------------------------------------------------------------- estado
+
+
+@pytest.mark.asyncio
+async def test_confirmar_descuenta_stock_y_fija_confirmada_at() -> None:
+    camisa = _sku_venta(cantidad=5)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 2))
+    actor = _actor()
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta) as repos:
+        await VentaService.change_estado(
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CONFIRMADA), actor
+        )
+
+    assert venta.estado == EstadoVenta.CONFIRMADA
+    assert venta.confirmada_at is not None
+    assert venta.cancelada_at is None
+    assert venta.updated_by == actor.id
+    assert camisa.sku.stock["cantidad"] == 3
+    assert repos["get_skus"].call_args.kwargs["for_update"] is True
+
+
+@pytest.mark.asyncio
+async def test_confirmar_sin_stock_responde_409() -> None:
+    camisa = _sku_venta(cantidad=1)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 2))
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta), pytest.raises(AppException) as error:
+        await VentaService.change_estado(
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CONFIRMADA), _actor()
+        )
+
+    assert error.value.status_code == 409
+    assert venta.estado == EstadoVenta.PENDIENTE
+    assert camisa.sku.stock["cantidad"] == 1
+
+
+@pytest.mark.asyncio
+async def test_confirmar_con_sku_eliminado_responde_409() -> None:
+    camisa = _sku_venta()
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1))
+
+    with _repos(skus={}, venta=venta), pytest.raises(AppException) as error:
+        await VentaService.change_estado(
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CONFIRMADA), _actor()
+        )
+
+    assert error.value.status_code == 409
+    assert "Camisa Oxford" in error.value.message
+
+
+@pytest.mark.asyncio
+async def test_cajero_cancela_pendiente_sin_tocar_stock() -> None:
+    camisa = _sku_venta(cantidad=5)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 2))
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta) as repos:
+        await VentaService.change_estado(
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CANCELADA), _actor(Role.CAJERO)
+        )
+
+    assert venta.estado == EstadoVenta.CANCELADA
+    assert venta.cancelada_at is not None
+    assert camisa.sku.stock["cantidad"] == 5
+    repos["get_skus"].assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cajero_no_puede_anular_confirmada() -> None:
+    camisa = _sku_venta(cantidad=3)
+    venta = _venta(EstadoVenta.CONFIRMADA, (camisa, 2))
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta), pytest.raises(AppException) as error:
+        await VentaService.change_estado(
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CANCELADA), _actor(Role.CAJERO)
+        )
+
+    assert error.value.status_code == 403
+    assert venta.estado == EstadoVenta.CONFIRMADA
+    assert camisa.sku.stock["cantidad"] == 3
+
+
+@pytest.mark.asyncio
+async def test_admin_anula_confirmada_y_devuelve_stock() -> None:
+    camisa = _sku_venta(cantidad=3)
+    venta = _venta(EstadoVenta.CONFIRMADA, (camisa, 2))
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta):
+        await VentaService.change_estado(
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CANCELADA), _actor(Role.ADMIN)
+        )
+
+    assert venta.estado == EstadoVenta.CANCELADA
+    assert venta.cancelada_at is not None
+    assert camisa.sku.stock["cantidad"] == 5
+
+
+@pytest.mark.parametrize(
+    ("actual", "destino"),
+    [
+        (EstadoVenta.CANCELADA, EstadoVenta.CONFIRMADA),
+        (EstadoVenta.CANCELADA, EstadoVenta.CANCELADA),
+        (EstadoVenta.CONFIRMADA, EstadoVenta.CONFIRMADA),
+    ],
+)
+@pytest.mark.asyncio
+async def test_transiciones_invalidas_responden_409(actual: EstadoVenta, destino: EstadoVenta) -> None:
+    camisa = _sku_venta()
+    venta = _venta(actual, (camisa, 1))
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta), pytest.raises(AppException) as error:
+        await VentaService.change_estado(
+            _session(), venta.id, VentaEstadoUpdate(estado=destino), _actor(Role.ADMIN)
+        )
+
+    assert error.value.status_code == 409

@@ -5,7 +5,6 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.categoria_productos.models import CategoriaProducto
-from app.domains.categorias.models import Categoria
 
 
 class CategoriaProductoRepository:
@@ -29,20 +28,6 @@ class CategoriaProductoRepository:
 
         result = await self.db_session.execute(
             statement.order_by(CategoriaProducto.created_at, CategoriaProducto.id)
-        )
-        return list(result.scalars().all())
-
-    async def list_categorias_by_producto(self, producto_id: UUID) -> list[Categoria]:
-        """Categorías activas de un producto, en el orden en que se le asignaron."""
-        result = await self.db_session.execute(
-            select(Categoria)
-            .join(CategoriaProducto, CategoriaProducto.categoria_id == Categoria.id)
-            .where(
-                CategoriaProducto.producto_id == producto_id,
-                CategoriaProducto.is_deleted.is_(False),
-                Categoria.is_deleted.is_(False),
-            )
-            .order_by(CategoriaProducto.created_at, CategoriaProducto.id)
         )
         return list(result.scalars().all())
 

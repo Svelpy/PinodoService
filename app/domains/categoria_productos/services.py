@@ -1,28 +1,20 @@
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.base_model import utc_now
-from app.core.logging import get_logger
 from app.domains.categoria_productos.models import CategoriaProducto
 from app.domains.categoria_productos.repositories import CategoriaProductoRepository
-from app.domains.categoria_productos.schemas import ProductoCategoriasUpdate
-from app.domains.categorias.models import Categoria
 from app.domains.categorias.repositories import CategoriaRepository
-from app.domains.productos.repositories import ProductoRepository
 from app.shared.errors.codes import ErrorCode
 from app.shared.errors.exceptions import AppException
 
 
-logger = get_logger(__name__)
-
-
 class CategoriaProductoService:
     """
-    Gestión de las categorías de un producto (AGENTS.md §9, tablas de enlace).
-
-    El enlace no es un recurso: el conjunto completo se reemplaza desde el producto.
+    Categorías de un producto (tabla de enlace N:M). No tiene rutas propias: el
+    conjunto completo se reemplaza desde POST y PATCH /productos con
+    categoria_ids, que validan y aplican con este service.
     """
 
     @staticmethod
@@ -71,36 +63,30 @@ class CategoriaProductoService:
             )
 
     @classmethod
-    async def replace_categorias(
+    async def apply_categorias(
         cls,
         db_session: AsyncSession,
         producto_id: UUID,
-        data: ProductoCategoriasUpdate,
+        seccion_id: UUID,
+        categoria_ids: list[UUID],
         actor_id: UUID,
-    ) -> list[Categoria]:
+        now: datetime,
+    ) -> tuple[int, int]:
         """
-        Deja al producto exactamente en las categorías recibidas.
+        Deja al producto exactamente en categoria_ids, validadas contra
+        seccion_id: conserva los enlaces que siguen, elimina lógicamente los que
+        sobran y crea los nuevos. No hace commit: lo hace quien coordina, con el
+        producto ya bloqueado. Devuelve (añadidas, quitadas).
 
-        Los enlaces que se mantienen no se tocan, los que sobran se eliminan
-        lógicamente y los nuevos se crean, todo en una transacción. Cada
-        categoría debe existir y pertenecer a la sección del producto.
+        Lo usan POST y PATCH /productos/{id}.
         """
-        producto = await ProductoRepository(db_session).get_by_id(producto_id, for_update=True)
-        if producto is None:
-            raise AppException(
-                "Producto no encontrado.",
-                404,
-                ErrorCode.RESOURCE_NOT_FOUND,
-            )
-
-        await cls.validate_categorias(db_session, data.categoria_ids, producto.seccion_id)
+        await cls.validate_categorias(db_session, categoria_ids, seccion_id)
 
         repository = CategoriaProductoRepository(db_session)
-        current_links = await repository.list_active_by_producto(producto.id, for_update=True)
+        current_links = await repository.list_active_by_producto(producto_id, for_update=True)
         current_ids = {link.categoria_id for link in current_links}
-        target_ids = set(data.categoria_ids)
+        target_ids = set(categoria_ids)
 
-        now = utc_now()
         removed = 0
         for link in current_links:
             if link.categoria_id not in target_ids:
@@ -112,38 +98,24 @@ class CategoriaProductoService:
                 removed += 1
 
         added = 0
-        for categoria_id in data.categoria_ids:
+        for categoria_id in categoria_ids:
             if categoria_id not in current_ids:
                 repository.add(
                     CategoriaProducto(
                         categoria_id=categoria_id,
-                        producto_id=producto.id,
+                        producto_id=producto_id,
                         created_by=actor_id,
                         updated_by=actor_id,
                     )
                 )
                 added += 1
 
-        if removed or added:
-            try:
-                await db_session.commit()
-            except IntegrityError as error:
-                await db_session.rollback()
-                raise AppException(
-                    "Las categorías del producto cambiaron al mismo tiempo; vuelve a intentarlo.",
-                    409,
-                    ErrorCode.CONFLICT,
-                ) from error
-            except Exception:
-                await db_session.rollback()
-                raise
+        return added, removed
 
-            logger.info(
-                "Categorías de producto reemplazadas: producto_id=%s añadidas=%s quitadas=%s actor_id=%s",
-                producto.id,
-                added,
-                removed,
-                actor_id,
-            )
-
-        return await repository.list_categorias_by_producto(producto.id)
+    @staticmethod
+    def concurrent_change() -> AppException:
+        return AppException(
+            "Las categorías del producto cambiaron al mismo tiempo; vuelve a intentarlo.",
+            409,
+            ErrorCode.CONFLICT,
+        )

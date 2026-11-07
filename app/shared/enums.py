@@ -14,12 +14,12 @@ class Module(str, Enum):
     SECCION = "SECCION"
     CATEGORIA = "CATEGORIA"
     PRODUCTO = "PRODUCTO"
-    CATEGORIA_PRODUCTO = "CATEGORIA_PRODUCTO"
     COLOR = "COLOR"
     PRODUCTO_COLOR = "PRODUCTO_COLOR"
     IMAGEN = "IMAGEN"
     TALLA = "TALLA"
     SKU = "SKU"
+    VENTA = "VENTA"
 
 
 class Action(str, Enum):
@@ -36,3 +36,20 @@ class TipoImagen(str, Enum):
     DETALLE = "DETALLE"
 
 
+
+
+class CanalVenta(str, Enum):
+    WHATSAPP = "WHATSAPP"
+    TIENDA = "TIENDA"
+
+
+class EstadoVenta(str, Enum):
+    PENDIENTE = "PENDIENTE"
+    CONFIRMADA = "CONFIRMADA"
+    CANCELADA = "CANCELADA"
+
+
+class MetodoPago(str, Enum):
+    EFECTIVO = "EFECTIVO"
+    QR = "QR"
+    TRANSFERENCIA = "TRANSFERENCIA"

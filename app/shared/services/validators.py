@@ -116,8 +116,8 @@ def validator_non_negative_integer(value: object) -> int:
     return value
 
 
-def validator_positive_money(value: object) -> Decimal:
-    """Convierte un importe finito y positivo a Decimal."""
+def validator_non_negative_money(value: object) -> Decimal:
+    """Convierte un importe finito y mayor o igual a cero a Decimal."""
     if isinstance(value, bool) or not isinstance(
         value,
         (Decimal, int, float, str),
@@ -131,7 +131,15 @@ def validator_positive_money(value: object) -> Decimal:
         raise ValueError("El importe debe ser un número válido.") from error
     if not amount.is_finite():
         raise ValueError("El importe debe ser finito.")
-    if amount <= 0:
+    if amount < 0:
+        raise ValueError("El importe debe ser mayor o igual a cero.")
+    return amount
+
+
+def validator_positive_money(value: object) -> Decimal:
+    """Convierte un importe finito y positivo a Decimal."""
+    amount = validator_non_negative_money(value)
+    if amount == 0:
         raise ValueError("El importe debe ser mayor que cero.")
     return amount
 

@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 
 from app.domains.categoria_productos.repositories import CategoriaProductoRepository
+from app.domains.categoria_productos.services import CategoriaProductoService
 from app.domains.producto_colores.repositories import ProductoColorRepository
 from app.domains.producto_colores.services import ProductoColorService
 from app.domains.productos.models import Producto
@@ -161,6 +162,109 @@ async def test_update_cambio_a_seccion_inexistente_no_quita_categorias() -> None
     assert error.value.status_code == 422
     assert producto.seccion_id == seccion_original
     quitar.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_con_categorias_y_nueva_seccion_valida_contra_la_nueva() -> None:
+    producto = _producto()
+    destino = uuid4()
+    categoria_ids = [uuid4(), uuid4()]
+    actor_id = uuid4()
+    session = _session()
+
+    with (
+        patch.object(ProductoService, "get", new=AsyncMock(return_value=producto)) as get,
+        patch.object(
+            SeccionRepository,
+            "get_by_id",
+            new=AsyncMock(return_value=Seccion(nombre="Mujer", slug="mujer")),
+        ),
+        patch.object(
+            CategoriaProductoService, "apply_categorias", new=AsyncMock(return_value=(2, 3))
+        ) as aplicar,
+        patch.object(CategoriaProductoRepository, "soft_delete_by_producto", new=AsyncMock()) as quitar,
+        patch.object(ProductoService, "get_detail", new=AsyncMock(return_value=producto)),
+    ):
+        result = await ProductoService.update(
+            session,
+            producto.id,
+            ProductoUpdate(seccion_id=destino, categoria_ids=categoria_ids),
+            actor_id,
+            MagicMock(),
+        )
+
+    assert get.await_args.kwargs["for_update"] is True
+    aplicar.assert_awaited_once_with(session, producto.id, destino, categoria_ids, actor_id, ANY)
+    quitar.assert_not_awaited()
+    assert result.seccion_id == destino
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_solo_categorias_no_modifica_el_producto() -> None:
+    producto = _producto()
+    updated_at = producto.updated_at
+    session = _session()
+
+    with (
+        patch.object(ProductoService, "get", new=AsyncMock(return_value=producto)),
+        patch.object(
+            CategoriaProductoService, "apply_categorias", new=AsyncMock(return_value=(1, 0))
+        ) as aplicar,
+        patch.object(ProductoService, "get_detail", new=AsyncMock(return_value=producto)),
+    ):
+        await ProductoService.update(
+            session, producto.id, ProductoUpdate(categoria_ids=[uuid4()]), uuid4(), MagicMock()
+        )
+
+    # Se validan contra la sección actual y solo cambian los enlaces.
+    assert aplicar.await_args.args[2] == producto.seccion_id
+    assert producto.updated_at == updated_at
+    assert producto.updated_by is None
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_mismas_categorias_no_hace_commit() -> None:
+    producto = _producto()
+    session = _session()
+
+    with (
+        patch.object(ProductoService, "get", new=AsyncMock(return_value=producto)),
+        patch.object(CategoriaProductoService, "apply_categorias", new=AsyncMock(return_value=(0, 0))),
+        patch.object(ProductoService, "get_detail", new=AsyncMock(return_value=producto)) as detail,
+    ):
+        await ProductoService.update(
+            session, producto.id, ProductoUpdate(categoria_ids=[uuid4()]), uuid4(), MagicMock()
+        )
+
+    session.commit.assert_not_awaited()
+    detail.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_categorias_invalidas_no_guarda_nada() -> None:
+    producto = _producto()
+    nombre_original = producto.nombre
+    session = _session()
+    invalidas = AppException("Categorías de otra sección que el producto.", 422)
+
+    with (
+        patch.object(ProductoService, "get", new=AsyncMock(return_value=producto)),
+        patch.object(CategoriaProductoService, "apply_categorias", new=AsyncMock(side_effect=invalidas)),
+    ):
+        with pytest.raises(AppException) as error:
+            await ProductoService.update(
+                session,
+                producto.id,
+                ProductoUpdate(nombre="Otro nombre", categoria_ids=[uuid4()]),
+                uuid4(),
+                MagicMock(),
+            )
+
+    assert error.value.status_code == 422
+    assert producto.nombre == nombre_original
+    session.commit.assert_not_awaited()
 
 
 @pytest.mark.asyncio

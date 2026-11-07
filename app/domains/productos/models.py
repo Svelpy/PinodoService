@@ -32,8 +32,8 @@ class Producto(BaseModel, table=True):
         }
     )
     # N:M de solo lectura a través de los enlaces activos, en el orden en que se
-    # asignaron; las asignaciones se gestionan con PUT /productos/{id}/categorias
-    # (AGENTS.md §9).
+    # asignaron; las asignaciones se gestionan con categoria_ids en POST y
+    # PATCH /productos.
     categorias: list[Categoria] = Relationship(
         sa_relationship_kwargs={
             "lazy": "raise",
