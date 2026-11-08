@@ -73,6 +73,16 @@ class SkuRepository:
         result = await self.db_session.execute(statement)
         return result.scalar_one_or_none()
 
+    async def codigo_barras_usado(self, codigo_barras: str) -> bool:
+        """
+        True si algún SKU, activo o eliminado, usa ese código: un código ya
+        impreso en una etiqueta no debe pasar a identificar otra prenda.
+        """
+        result = await self.db_session.execute(
+            select(Sku.id).where(Sku.codigo_barras == codigo_barras).limit(1)
+        )
+        return result.first() is not None
+
     async def list_active_by_producto_color(
         self,
         producto_color_id: UUID,

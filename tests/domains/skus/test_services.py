@@ -448,3 +448,46 @@ async def test_inventario_normaliza_el_codigo_y_rechaza_uno_invalido() -> None:
     assert repo.await_args_list[0].kwargs["codigo_barras"] == "841-23"
     assert error.value.status_code == 422
     assert "codigo_barras" in error.value.details
+
+
+# --- Código de barras sugerido ----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("doce_digitos", "control"),
+    [("400638133393", "1"), ("590123412345", "7"), ("200123456789", "3")],
+)
+def test_ean13_digito_control(doce_digitos: str, control: str) -> None:
+    assert SkuService.ean13_digito_control(doce_digitos) == control
+
+
+@pytest.mark.asyncio
+async def test_sugerir_codigo_barras_devuelve_ean13_de_uso_interno() -> None:
+    with patch.object(SkuRepository, "codigo_barras_usado", new=AsyncMock(return_value=False)):
+        codigo = await SkuService.sugerir_codigo_barras(_session())
+
+    assert len(codigo) == 13 and codigo.isdigit()
+    assert codigo.startswith("20")
+    assert codigo[-1] == SkuService.ean13_digito_control(codigo[:12])
+
+
+@pytest.mark.asyncio
+async def test_sugerir_codigo_barras_reintenta_si_ya_existe() -> None:
+    with patch.object(
+        SkuRepository, "codigo_barras_usado", new=AsyncMock(side_effect=[True, True, False])
+    ) as usado:
+        codigo = await SkuService.sugerir_codigo_barras(_session())
+
+    assert usado.await_count == 3
+    assert usado.await_args.args[0] == codigo
+
+
+@pytest.mark.asyncio
+async def test_sugerir_codigo_barras_falla_si_no_encuentra_uno_libre() -> None:
+    with (
+        patch.object(SkuRepository, "codigo_barras_usado", new=AsyncMock(return_value=True)),
+        pytest.raises(AppException) as error,
+    ):
+        await SkuService.sugerir_codigo_barras(_session())
+
+    assert error.value.status_code == 500

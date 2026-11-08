@@ -13,7 +13,6 @@ from app.domains.imagenes.schemas import (
     ImagenCreate,
     ImagenListItem,
     ImagenResponse,
-    ImagenUpdate,
 )
 from app.domains.producto_colores.repositories import ProductoColorRepository
 from app.integrations.cloudinary import CloudinaryService
@@ -211,29 +210,6 @@ class ImagenService:
         )
 
         logger.info("Imagen creada: imagen_id=%s actor_id=%s", imagen.id, actor_id)
-        return imagen
-
-    @classmethod
-    async def update(
-        cls,
-        db_session: AsyncSession,
-        imagen_id: UUID,
-        data: ImagenUpdate,
-        actor_id: UUID,
-    ) -> Imagen:
-        """Solo cambia el tipo; para cambiar el archivo se elimina y se sube otra imagen."""
-        changes = data.model_dump(exclude_unset=True)
-        imagen = await cls.get(db_session, imagen_id, for_update=bool(changes))
-        if not changes:
-            return imagen
-
-        for field_name, value in changes.items():
-            setattr(imagen, field_name, value)
-        imagen.updated_at = utc_now()
-        imagen.updated_by = actor_id
-        await cls._commit(db_session, imagen)
-
-        logger.info("Imagen actualizada: imagen_id=%s actor_id=%s", imagen.id, actor_id)
         return imagen
 
     @classmethod

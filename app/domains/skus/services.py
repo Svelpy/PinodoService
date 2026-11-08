@@ -1,3 +1,4 @@
+import secrets
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, TypeVar
@@ -35,6 +36,11 @@ from app.shared.services.validators import validator_barcode
 logger = get_logger(__name__)
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
+
+# GS1 reserva los prefijos 20-29 para códigos de uso interno de cada tienda:
+# nunca coinciden con el código de un producto de fabricante.
+PREFIJO_EAN_USO_INTERNO = "20"
+INTENTOS_CODIGO_BARRAS = 10
 
 
 class SkuService:
@@ -198,6 +204,33 @@ class SkuService:
         )
         if existing is not None:
             raise cls.duplicate_codigo_barras()
+
+    @staticmethod
+    def ean13_digito_control(doce_digitos: str) -> str:
+        """Dígito de control EAN-13: pesos 1 y 3 alternados desde la izquierda."""
+        suma = sum(int(digito) * (3 if indice % 2 else 1) for indice, digito in enumerate(doce_digitos))
+        return str((10 - suma % 10) % 10)
+
+    @classmethod
+    async def sugerir_codigo_barras(cls, db_session: AsyncSession) -> str:
+        """
+        Propone un EAN-13 de uso interno que ningún SKU, activo o eliminado,
+        usa. No lo reserva: si otro SKU lo toma antes de guardarlo, el índice
+        único responde 409, algo improbable entre 10¹⁰ combinaciones.
+        """
+        repository = SkuRepository(db_session)
+        for _ in range(INTENTOS_CODIGO_BARRAS):
+            base = PREFIJO_EAN_USO_INTERNO + "".join(
+                str(secrets.randbelow(10)) for _ in range(12 - len(PREFIJO_EAN_USO_INTERNO))
+            )
+            codigo = base + cls.ean13_digito_control(base)
+            if not await repository.codigo_barras_usado(codigo):
+                return codigo
+        raise AppException(
+            "No se pudo generar un código de barras libre; intenta de nuevo.",
+            500,
+            ErrorCode.INTERNAL_ERROR,
+        )
 
     @staticmethod
     async def get(

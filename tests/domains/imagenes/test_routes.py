@@ -123,15 +123,6 @@ def test_no_existe_listado(
     assert response.status_code == 405
 
 
-def test_patch_solo_acepta_tipo(
-    route_context: tuple[TestClient, CurrentUser, MagicMock],
-) -> None:
-    client, _, _ = route_context
-
-    assert client.patch(f"/imagenes/{uuid4()}", json={"url": URL}).status_code == 422
-    assert client.patch(f"/imagenes/{uuid4()}", json={"tipo": None}).status_code == 422
-
-
 def test_delete_responde_204(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:

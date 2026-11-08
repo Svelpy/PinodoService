@@ -38,7 +38,7 @@ class Venta(BaseModel, table=True):
     estado: EstadoVenta = Field(default=EstadoVenta.PENDIENTE,sa_type=SQLAlchemyEnum(EstadoVenta,name="estado_venta",native_enum=False,create_constraint=True,length=20,),nullable=False,)
     metodo_pago: MetodoPago = Field(default=MetodoPago.EFECTIVO,sa_type=SQLAlchemyEnum(MetodoPago,name="metodo_pago",native_enum=False,create_constraint=True,length=20,),nullable=False,)
     referencia: str | None = Field(default=None, max_length=150, nullable=True)
-    cliente_telefono: str | None = Field(default=None, max_length=30, nullable=True)
+    cliente_telefono: str | None = Field(default=None, max_length=20, nullable=True)
     subtotal: Decimal = Field(default=Decimal("0"), sa_type=Numeric(12, 2), nullable=False)
     descuento: Decimal = Field(default=Decimal("0"), sa_type=Numeric(12, 2), nullable=False)
     total: Decimal = Field(default=Decimal("0"), sa_type=Numeric(12, 2), nullable=False)

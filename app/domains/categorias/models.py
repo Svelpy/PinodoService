@@ -12,12 +12,22 @@ class Categoria(BaseModel, table=True):
     __table_args__ = (
         Index("categorias_idx_categorias_parent", "parent_id"),
         Index("categorias_idx_categorias_seccion", "seccion_id"),
+        # El nombre (su slug) es único entre hermanas. Son dos índices porque
+        # PostgreSQL trata cada NULL como distinto: las raíces (parent_id NULL)
+        # se comparan dentro de su sección y las subcategorías, dentro de su padre.
         Index(
-            "uq_categorias_seccion_slug",
+            "uq_categorias_raiz_slug",
             "seccion_id",
             "slug",
             unique=True,
-            postgresql_where=text("is_deleted = false"),
+            postgresql_where=text("parent_id IS NULL AND is_deleted = false"),
+        ),
+        Index(
+            "uq_categorias_hermanas_slug",
+            "parent_id",
+            "slug",
+            unique=True,
+            postgresql_where=text("parent_id IS NOT NULL AND is_deleted = false"),
         ),
         {"schema": "public"},
     )

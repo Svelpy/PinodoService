@@ -9,6 +9,7 @@ from app.core.database import get_db
 from app.domains.auth.dependencies import require_permission
 from app.domains.auth.schemas import CurrentUser
 from app.domains.skus.schemas import (
+    CodigoBarrasSugerido,
     SkuCreate,
     SkuDetail,
     SkuInventarioItem,
@@ -59,6 +60,28 @@ async def create_sku(
 ) -> SkuDetail:
     sku = await SkuService.create(db_session, data, current_user.id)
     return SkuService.detail(sku, settings)
+
+
+@router.post(
+    "/sugerir-codigo-barras",
+    response_model=CodigoBarrasSugerido,
+    summary="Sugerir código de barras",
+    description=(
+        "No recibe nada. Devuelve un EAN-13 de 13 dígitos para uso interno de la "
+        "tienda (prefijo GS1 20, que no coincide con códigos de fabricante) que "
+        "ningún SKU usa, ni siquiera uno eliminado. No crea nada ni lo reserva: "
+        "se envía después como codigo_barras al crear o editar el SKU."
+    ),
+    responses=_error_responses(401, 403, 500),
+)
+async def sugerir_codigo_barras(
+    current_user: Annotated[
+        CurrentUser,
+        Depends(require_permission(Module.SKU, Action.CREATE)),
+    ],
+    db_session: Annotated[AsyncSession, Depends(get_db)],
+) -> CodigoBarrasSugerido:
+    return CodigoBarrasSugerido(codigo_barras=await SkuService.sugerir_codigo_barras(db_session))
 
 
 @router.get(

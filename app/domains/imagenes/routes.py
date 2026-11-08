@@ -13,7 +13,6 @@ from app.domains.imagenes.schemas import (
     ImagenCreate,
     ImagenDetail,
     ImagenResponseAudit,
-    ImagenUpdate,
     ImagenUploadResponse,
 )
 from app.domains.imagenes.services import ImagenService
@@ -161,25 +160,6 @@ async def get_imagen_audit(
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> ImagenResponseAudit:
     return await ImagenService.get(db_session, imagen_id, include_deleted=True)
-
-
-@router.patch(
-    "/{imagen_id}",
-    response_model=ImagenDetail,
-    summary="Cambiar el tipo de una imagen",
-    description="Solo se puede cambiar el tipo. Para cambiar la foto, elimínala y sube otra.",
-    responses=_error_responses(401, 403, 404, 422, 500),
-)
-async def update_imagen(
-    imagen_id: UUID,
-    data: ImagenUpdate,
-    current_user: Annotated[
-        CurrentUser,
-        Depends(require_permission(Module.IMAGEN, Action.UPDATE)),
-    ],
-    db_session: Annotated[AsyncSession, Depends(get_db)],
-) -> ImagenDetail:
-    return await ImagenService.update(db_session, imagen_id, data, current_user.id)
 
 
 @router.delete(

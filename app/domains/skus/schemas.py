@@ -362,6 +362,19 @@ class SkuUpdate(BaseModel):
     )
 
 
+class CodigoBarrasSugerido(BaseModel):
+    """
+    Respuesta de POST /skus/sugerir-codigo-barras: un EAN-13 de uso interno
+    (prefijo GS1 20) que ningún SKU usa. No queda reservado.
+    """
+
+    codigo_barras: str
+
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"codigo_barras": "2001234567893"}},
+    )
+
+
 class SkuResponse(BaseModel):
     id: UUID
     producto_color_id: UUID

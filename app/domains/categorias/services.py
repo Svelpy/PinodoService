@@ -35,12 +35,8 @@ class CategoriaService:
 
     @staticmethod
     def _slug_conflict() -> AppException:
-        return AppException(
-            "Ya existe una categoría con ese nombre en la sección.",
-            409,
-            ErrorCode.CONFLICT,
-            {"nombre": "Ya existe una categoría con ese nombre en la sección."},
-        )
+        message = "Ya existe una categoría con ese nombre en el mismo nivel del árbol."
+        return AppException(message, 409, ErrorCode.CONFLICT, {"nombre": message})
 
     @staticmethod
     def _invalid_reference(field_name: str, message: str) -> AppException:
@@ -57,7 +53,7 @@ class CategoriaService:
                 None,
             )
 
-        if constraint_name == "uq_categorias_seccion_slug":
+        if constraint_name in ("uq_categorias_raiz_slug", "uq_categorias_hermanas_slug"):
             return cls._slug_conflict()
 
         return AppException(
@@ -152,10 +148,14 @@ class CategoriaService:
         cls,
         repository: CategoriaRepository,
         seccion_id: UUID,
+        parent_id: UUID | None,
         slug: str,
         exclude_id: UUID | None = None,
     ) -> None:
-        existing = await repository.get_active_by_slug(seccion_id, slug, exclude_id=exclude_id)
+        """El nombre es único entre hermanas: mismo padre o, en las raíces, misma sección."""
+        existing = await repository.get_active_sibling_by_slug(
+            seccion_id, parent_id, slug, exclude_id=exclude_id
+        )
         if existing is not None:
             raise cls._slug_conflict()
 
@@ -382,7 +382,7 @@ class CategoriaService:
             await cls._validate_parent(repository, data.parent_id, data.seccion_id)
 
         slug = generate_slug(data.nombre)
-        await cls._validate_unique_slug(repository, data.seccion_id, slug)
+        await cls._validate_unique_slug(repository, data.seccion_id, data.parent_id, slug)
 
         categoria = Categoria(
             **data.model_dump(),
@@ -409,9 +409,10 @@ class CategoriaService:
         actor_id: UUID,
     ) -> CategoriaDetail:
         """
-        Actualiza una categoría. Si cambia el nombre o la sección se regenera y
-        revalida el slug. Una categoría con subcategorías activas o productos
-        asignados no cambia de sección.
+        Actualiza el nombre, la visibilidad o el lugar en el árbol de su
+        sección. La rama se mueve completa, con sus subcategorías y productos.
+        Si cambia el nombre o el padre, se revalida que el nombre sea único
+        entre sus nuevas hermanas.
         """
         changes = data.model_dump(exclude_unset=True)
         categoria = await cls.get(db_session, categoria_id, for_update=bool(changes))
@@ -419,40 +420,18 @@ class CategoriaService:
             return await cls.get_detail(db_session, categoria_id)
 
         repository = CategoriaRepository(db_session)
-        target_seccion_id = changes.get("seccion_id", categoria.seccion_id)
-        target_parent_id = changes.get("parent_id", categoria.parent_id)
-        seccion_changed = target_seccion_id != categoria.seccion_id
+        parent_id = changes.get("parent_id", categoria.parent_id)
+        parent_changed = parent_id != categoria.parent_id
 
-        if seccion_changed:
-            await cls._validate_seccion(db_session, target_seccion_id)
-            if await repository.has_active_children(categoria.id):
-                raise AppException(
-                    "No se puede cambiar de sección una categoría con subcategorías activas.",
-                    409,
-                    ErrorCode.CONFLICT,
-                    {"seccion_id": "Mueve o elimina antes sus subcategorías."},
-                )
-            if await repository.has_active_products(categoria.id):
-                raise AppException(
-                    "No se puede cambiar de sección una categoría con productos asignados.",
-                    409,
-                    ErrorCode.CONFLICT,
-                    {"seccion_id": "Quita antes sus productos: deben ser de su misma sección."},
-                )
+        if parent_changed and parent_id is not None:
+            await cls._validate_parent(repository, parent_id, categoria.seccion_id, categoria.id)
 
-        if target_parent_id is not None and (seccion_changed or "parent_id" in changes):
-            await cls._validate_parent(
-                repository,
-                target_parent_id,
-                target_seccion_id,
-                categoria.id,
-            )
-
-        if "nombre" in changes or seccion_changed:
+        if "nombre" in changes or parent_changed:
             slug = generate_slug(changes.get("nombre", categoria.nombre))
             await cls._validate_unique_slug(
                 repository,
-                target_seccion_id,
+                categoria.seccion_id,
+                parent_id,
                 slug,
                 exclude_id=categoria.id,
             )

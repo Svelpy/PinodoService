@@ -39,7 +39,7 @@ def _by_id(*categorias: Categoria) -> AsyncMock:
 
 
 @pytest.mark.asyncio
-async def test_create_genera_slug_y_valida_unicidad_dentro_de_la_seccion() -> None:
+async def test_create_genera_slug_y_valida_unicidad_entre_las_raices_de_la_seccion() -> None:
     seccion = _seccion()
     session = _session()
     actor_id = uuid4()
@@ -48,7 +48,7 @@ async def test_create_genera_slug_y_valida_unicidad_dentro_de_la_seccion() -> No
         patch.object(SeccionRepository, "get_by_id", new=AsyncMock(return_value=seccion)),
         patch.object(
             CategoriaRepository,
-            "get_active_by_slug",
+            "get_active_sibling_by_slug",
             new=AsyncMock(return_value=None),
         ) as get_by_slug,
         patch.object(CategoriaRepository, "add") as add,
@@ -67,7 +67,7 @@ async def test_create_genera_slug_y_valida_unicidad_dentro_de_la_seccion() -> No
     # Responde lo mismo que GET /{id}: se recarga con su Detail.
     get_detail.assert_awaited_once_with(session, categoria.id)
 
-    get_by_slug.assert_awaited_once_with(seccion.id, "vestidos-largos", exclude_id=None)
+    get_by_slug.assert_awaited_once_with(seccion.id, None, "vestidos-largos", exclude_id=None)
     assert categoria.slug == "vestidos-largos"
     assert categoria.created_by == actor_id
     add.assert_called_once_with(categoria)
@@ -109,14 +109,14 @@ async def test_create_rechaza_padre_de_otra_seccion() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_rechaza_slug_duplicado_en_la_seccion() -> None:
+async def test_create_rechaza_nombre_repetido_entre_hermanas() -> None:
     seccion = _seccion()
 
     with (
         patch.object(SeccionRepository, "get_by_id", new=AsyncMock(return_value=seccion)),
         patch.object(
             CategoriaRepository,
-            "get_active_by_slug",
+            "get_active_sibling_by_slug",
             new=AsyncMock(return_value=_categoria(seccion.id)),
         ),
     ):
@@ -185,6 +185,11 @@ async def test_update_mueve_dentro_del_arbol() -> None:
         patch.object(CategoriaService, "get_detail", new=AsyncMock(return_value=botas)),
         patch.object(CategoriaRepository, "get_by_id", new=_by_id(ropa, zapatos, botas)),
         patch.object(CategoriaRepository, "has_active_products", new=AsyncMock(return_value=False)),
+        patch.object(
+            CategoriaRepository,
+            "get_active_sibling_by_slug",
+            new=AsyncMock(return_value=None),
+        ) as hermana,
     ):
         result = await CategoriaService.update(
             session,
@@ -193,105 +198,87 @@ async def test_update_mueve_dentro_del_arbol() -> None:
             uuid4(),
         )
 
+    # El nombre se valida entre sus nuevas hermanas.
+    hermana.assert_awaited_once_with(seccion_id, zapatos.id, "botas", exclude_id=botas.id)
     assert result.parent_id == zapatos.id
     assert result.slug == "botas"
     session.commit.assert_awaited_once()
 
 
-@pytest.mark.asyncio
-async def test_update_cambio_de_seccion_con_hijos_responde_409() -> None:
-    categoria = _categoria(uuid4())
-
-    with (
-        patch.object(CategoriaService, "get", new=AsyncMock(return_value=categoria)),
-        patch.object(SeccionRepository, "get_by_id", new=AsyncMock(return_value=_seccion("Hombre"))),
-        patch.object(CategoriaRepository, "has_active_children", new=AsyncMock(return_value=True)),
-    ):
-        with pytest.raises(AppException) as error:
-            await CategoriaService.update(
-                _session(),
-                categoria.id,
-                CategoriaUpdate(seccion_id=uuid4()),
-                uuid4(),
-            )
-
-    assert error.value.status_code == 409
+def test_update_no_acepta_cambiar_la_seccion() -> None:
+    # Solo podría moverse vacía; eso equivale a eliminarla y crearla en la otra.
+    with pytest.raises(ValueError):
+        CategoriaUpdate.model_validate({"seccion_id": str(uuid4())})
 
 
 @pytest.mark.asyncio
-async def test_update_cambio_de_seccion_con_productos_responde_409() -> None:
-    categoria = _categoria(uuid4())
-    seccion_original = categoria.seccion_id
+async def test_update_rechaza_mover_junto_a_una_hermana_con_el_mismo_nombre() -> None:
+    seccion_id = uuid4()
+    ropa = _categoria(seccion_id, "Ropa")
+    accesorios = _categoria(seccion_id, "Accesorios")
+    basicos = _categoria(seccion_id, "Basicos", parent_id=ropa.id)
+    session = _session()
 
     with (
-        patch.object(CategoriaService, "get", new=AsyncMock(return_value=categoria)),
-        patch.object(SeccionRepository, "get_by_id", new=AsyncMock(return_value=_seccion("Hombre"))),
-        patch.object(CategoriaRepository, "has_active_children", new=AsyncMock(return_value=False)),
-        patch.object(CategoriaRepository, "has_active_products", new=AsyncMock(return_value=True)),
-    ):
-        with pytest.raises(AppException) as error:
-            await CategoriaService.update(
-                _session(),
-                categoria.id,
-                CategoriaUpdate(seccion_id=uuid4()),
-                uuid4(),
-            )
-
-    assert error.value.status_code == 409
-    assert categoria.seccion_id == seccion_original
-
-
-@pytest.mark.asyncio
-async def test_update_cambio_de_seccion_revalida_slug_en_la_seccion_destino() -> None:
-    categoria = _categoria(uuid4(), "Vestidos")
-    destino = _seccion("Niñas")
-
-    with (
-        patch.object(CategoriaService, "get", new=AsyncMock(return_value=categoria)),
-        patch.object(CategoriaService, "get_detail", new=AsyncMock(return_value=categoria)),
-        patch.object(SeccionRepository, "get_by_id", new=AsyncMock(return_value=destino)),
-        patch.object(CategoriaRepository, "has_active_children", new=AsyncMock(return_value=False)),
+        patch.object(CategoriaService, "get", new=AsyncMock(return_value=basicos)),
+        patch.object(CategoriaRepository, "get_by_id", new=_by_id(ropa, accesorios, basicos)),
         patch.object(CategoriaRepository, "has_active_products", new=AsyncMock(return_value=False)),
         patch.object(
             CategoriaRepository,
-            "get_active_by_slug",
-            new=AsyncMock(return_value=None),
-        ) as get_by_slug,
+            "get_active_sibling_by_slug",
+            new=AsyncMock(return_value=_categoria(seccion_id, "Basicos", parent_id=accesorios.id)),
+        ),
+        pytest.raises(AppException) as error,
     ):
-        result = await CategoriaService.update(
-            _session(),
-            categoria.id,
-            CategoriaUpdate(seccion_id=destino.id),
-            uuid4(),
-        )
+        await CategoriaService.update(session, basicos.id, CategoriaUpdate(parent_id=accesorios.id), uuid4())
 
-    get_by_slug.assert_awaited_once_with(destino.id, "vestidos", exclude_id=categoria.id)
-    assert result.seccion_id == destino.id
+    assert error.value.status_code == 409
+    assert "nombre" in error.value.details
+    assert basicos.parent_id == ropa.id
+    session.commit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_update_cambio_de_seccion_con_padre_de_la_seccion_anterior_responde_422() -> None:
+async def test_update_convertir_en_raiz_valida_el_nombre_entre_las_raices() -> None:
     seccion_id = uuid4()
     ropa = _categoria(seccion_id, "Ropa")
     vestidos = _categoria(seccion_id, "Vestidos", parent_id=ropa.id)
 
     with (
         patch.object(CategoriaService, "get", new=AsyncMock(return_value=vestidos)),
-        patch.object(SeccionRepository, "get_by_id", new=AsyncMock(return_value=_seccion("Niñas"))),
-        patch.object(CategoriaRepository, "has_active_children", new=AsyncMock(return_value=False)),
-        patch.object(CategoriaRepository, "has_active_products", new=AsyncMock(return_value=False)),
-        patch.object(CategoriaRepository, "get_by_id", new=_by_id(ropa, vestidos)),
+        patch.object(CategoriaService, "get_detail", new=AsyncMock(return_value=vestidos)),
+        patch.object(
+            CategoriaRepository,
+            "get_active_sibling_by_slug",
+            new=AsyncMock(return_value=None),
+        ) as hermana,
     ):
-        with pytest.raises(AppException) as error:
-            await CategoriaService.update(
-                _session(),
-                vestidos.id,
-                CategoriaUpdate(seccion_id=uuid4()),
-                uuid4(),
-            )
+        result = await CategoriaService.update(_session(), vestidos.id, CategoriaUpdate(parent_id=None), uuid4())
 
-    assert error.value.status_code == 422
-    assert "parent_id" in error.value.details
+    hermana.assert_awaited_once_with(seccion_id, None, "vestidos", exclude_id=vestidos.id)
+    assert result.parent_id is None
+
+
+@pytest.mark.asyncio
+async def test_update_solo_visibilidad_no_revalida_padre_ni_nombre() -> None:
+    categoria = _categoria(uuid4(), "Ropa", parent_id=uuid4())
+
+    with (
+        patch.object(CategoriaService, "get", new=AsyncMock(return_value=categoria)),
+        patch.object(CategoriaService, "get_detail", new=AsyncMock(return_value=categoria)),
+        patch.object(CategoriaRepository, "get_by_id", new=AsyncMock()) as padre,
+        patch.object(CategoriaRepository, "get_active_sibling_by_slug", new=AsyncMock()) as hermana,
+    ):
+        await CategoriaService.update(
+            _session(),
+            categoria.id,
+            CategoriaUpdate(is_visible=False, parent_id=categoria.parent_id),
+            uuid4(),
+        )
+
+    padre.assert_not_awaited()
+    hermana.assert_not_awaited()
+    assert categoria.is_visible is False
 
 
 @pytest.mark.asyncio

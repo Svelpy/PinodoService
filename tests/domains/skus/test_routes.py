@@ -196,3 +196,29 @@ def test_inventario_pasa_filtros_y_no_choca_con_get_por_id(
     assert kwargs["en_rebaja"] is True
     assert kwargs["bajo_minimo"] is None
     get.assert_not_awaited()
+
+
+def test_sugerir_codigo_barras_no_recibe_nada_y_devuelve_el_codigo(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, _, db_session = route_context
+
+    with patch.object(
+        SkuService,
+        "sugerir_codigo_barras",
+        new=AsyncMock(return_value="2001234567893"),
+    ) as service:
+        response = client.post("/skus/sugerir-codigo-barras")
+
+    assert response.status_code == 200
+    assert response.json() == {"codigo_barras": "2001234567893"}
+    service.assert_awaited_once_with(db_session)
+
+
+def test_sugerir_codigo_barras_exige_permiso_de_crear_skus(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, current_user, _ = route_context
+    current_user.rol = Role.CAJERO
+
+    assert client.post("/skus/sugerir-codigo-barras").status_code == 403

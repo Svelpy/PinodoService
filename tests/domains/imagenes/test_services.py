@@ -6,7 +6,7 @@ import pytest
 from app.core.config import get_settings
 from app.domains.imagenes.models import Imagen
 from app.domains.imagenes.repositories import ImagenRepository
-from app.domains.imagenes.schemas import ImagenCreate, ImagenUpdate
+from app.domains.imagenes.schemas import ImagenCreate
 from app.domains.imagenes.services import ImagenService
 from app.domains.producto_colores.models import ProductoColor
 from app.domains.producto_colores.repositories import ProductoColorRepository
@@ -134,31 +134,6 @@ async def test_create_no_mueve_la_imagen_si_falla_el_commit() -> None:
             )
 
     confirm.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_update_cambia_el_tipo() -> None:
-    imagen = _imagen()
-    actor_id = uuid4()
-
-    with patch.object(ImagenService, "get", new=AsyncMock(return_value=imagen)):
-        result = await ImagenService.update(
-            _session(),
-            imagen.id,
-            ImagenUpdate(tipo=TipoImagen.DETALLE),
-            actor_id,
-        )
-
-    assert result.tipo is TipoImagen.DETALLE
-    assert result.url == URL
-    assert result.updated_by == actor_id
-
-
-def test_update_no_acepta_url_ni_producto_color() -> None:
-    with pytest.raises(ValueError):
-        ImagenUpdate.model_validate({"url": URL})
-    with pytest.raises(ValueError):
-        ImagenUpdate.model_validate({"producto_color_id": str(uuid4())})
 
 
 @pytest.mark.asyncio

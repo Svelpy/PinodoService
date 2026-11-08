@@ -9,7 +9,6 @@ from app.domains.imagenes.schemas import (
     ImagenDetail,
     ImagenListItem,
     ImagenResponse,
-    ImagenUpdate,
 )
 from app.shared.enums import TipoImagen
 
@@ -33,14 +32,6 @@ def test_imagen_create_hereda_url_y_tipo_y_exige_el_color() -> None:
 def test_imagen_create_rechaza_datos_invalidos(overrides: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         ImagenCreate.model_validate({"producto_color_id": str(uuid4()), "url": SUBIDA, **overrides})
-
-
-def test_imagen_update_no_permite_cambiar_dueno_ni_null() -> None:
-    with pytest.raises(ValidationError):
-        ImagenUpdate.model_validate({"producto_color_id": str(uuid4())})
-
-    with pytest.raises(ValidationError):
-        ImagenUpdate(tipo=None)
 
 
 def test_imagen_response_desde_modelo() -> None:

@@ -22,5 +22,5 @@ class Usuario(BaseModel, table=True):
     password_hash: str = Field(max_length=255, nullable=False)
     nombre: str = Field(max_length=100, nullable=False)
     apellidos: str | None = Field(default=None, max_length=150, nullable=True)
-    telefono: str | None = Field(default=None, max_length=30, nullable=True)
+    telefono: str | None = Field(default=None, max_length=20, nullable=True)
     rol: Role = Field(sa_type=SQLAlchemyEnum(Role,name="rol_usuario",native_enum=False,create_constraint=True,length=20,),nullable=False)

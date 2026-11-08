@@ -89,32 +89,6 @@ class ImagenUploadResponse(BaseModel):
     )
 
 
-class ImagenUpdate(BaseModel):
-    """
-    producto_color_id es la foreign key de dueño y no se modifica.
-
-    Para reemplazar el archivo se elimina la imagen y se sube una nueva.
-    """
-
-    tipo: TipoImagen | None = Field(default=None)
-
-    @field_validator("tipo")
-    @classmethod
-    def validate_tipo(cls, value: TipoImagen | None) -> TipoImagen:
-        if value is None:
-            raise ValueError("El tipo de imagen no puede ser null.")
-        return value
-
-    model_config = ConfigDict(
-        extra="forbid",
-        json_schema_extra={
-            "example": {
-                "tipo": "DETALLE",
-            }
-        },
-    )
-
-
 class ImagenResponse(BaseModel):
     id: UUID
     producto_color_id: UUID

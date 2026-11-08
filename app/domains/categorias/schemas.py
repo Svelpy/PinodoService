@@ -42,19 +42,18 @@ class CategoriaCreate(BaseModel):
 
 
 class CategoriaUpdate(BaseModel):
-    """parent_id puede cambiarse para mover la categoría dentro del árbol; null la convierte en raíz."""
+    """
+    parent_id mueve la categoría dentro del árbol de su sección; null la
+    convierte en raíz.
 
-    seccion_id: UUID | None = Field(default=None)
+    La sección no se modifica: una categoría solo podría cambiar de sección
+    vacía, porque sus productos deben ser de su misma sección, y eso equivale a
+    eliminarla y crearla en la otra.
+    """
+
     parent_id: UUID | None = Field(default=None)
     nombre: str | None = Field(default=None, min_length=1, max_length=100)
     is_visible: bool | None = Field(default=None)
-
-    @field_validator("seccion_id")
-    @classmethod
-    def validate_seccion_id(cls, value: UUID | None) -> UUID:
-        if value is None:
-            raise ValueError("La sección no puede ser null.")
-        return value
 
     @field_validator("nombre", mode="before")
     @classmethod
@@ -74,7 +73,6 @@ class CategoriaUpdate(BaseModel):
         extra="forbid",
         json_schema_extra={
             "example": {
-                "seccion_id": "33333333-3333-4333-8333-333333333333",
                 "parent_id": "44444444-4444-4444-8444-444444444444",
                 "nombre": "Cazadoras bomber",
                 "is_visible": True,

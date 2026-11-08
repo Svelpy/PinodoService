@@ -73,7 +73,8 @@ async def get_arbol(
     status_code=status.HTTP_201_CREATED,
     summary="Crear categoría",
     description=(
-        "El slug se genera a partir del nombre y es único dentro de la sección. "
+        "El slug se genera a partir del nombre. El nombre es único entre "
+        "hermanas: mismo padre o, en las raíces, misma sección. "
         "La categoría padre no puede tener productos asignados (409), porque los "
         "productos solo se asignan a categorías sin subcategorías. "
         "La categoría padre, si se indica, debe pertenecer a la misma sección."
@@ -135,10 +136,13 @@ async def get_categoria_audit(
     response_model=CategoriaDetail,
     summary="Actualizar categoría",
     description=(
-        "Si cambia el nombre o la sección, el slug se regenera. parent_id null la "
-        "convierte en raíz. No se permiten ciclos ni padres de otra sección, y una "
-        "categoría con subcategorías activas o productos no puede cambiar de "
-        "sección. El nuevo padre no puede tener productos asignados (409)."
+        "Cambia el nombre, la visibilidad o el lugar en el árbol. La sección no "
+        "se modifica. parent_id mueve la categoría con sus subcategorías y "
+        "productos; null la convierte en raíz. El nuevo padre debe ser de la "
+        "misma sección, no puede ser una de sus subcategorías ni tener productos "
+        "asignados (409). El nombre es único entre hermanas (mismo padre o, en "
+        "las raíces, misma sección): si cambia el nombre o el padre, el slug se "
+        "regenera y se revalida (409)."
     ),
     responses=_error_responses(401, 403, 404, 409, 422, 500),
 )

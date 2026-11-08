@@ -34,18 +34,26 @@ class CategoriaRepository:
         result = await self.db_session.execute(statement)
         return result.scalar_one_or_none()
 
-    async def get_active_by_slug(
+    async def get_active_sibling_by_slug(
         self,
         seccion_id: UUID,
+        parent_id: UUID | None,
         slug: str,
         *,
         exclude_id: UUID | None = None,
     ) -> Categoria | None:
+        """Hermana activa con ese slug: misma categoría padre o, si es raíz, misma sección."""
         statement = select(Categoria).where(
-            Categoria.seccion_id == seccion_id,
             Categoria.slug == slug,
             Categoria.is_deleted.is_(False),
         )
+        if parent_id is None:
+            statement = statement.where(
+                Categoria.parent_id.is_(None),
+                Categoria.seccion_id == seccion_id,
+            )
+        else:
+            statement = statement.where(Categoria.parent_id == parent_id)
         if exclude_id is not None:
             statement = statement.where(Categoria.id != exclude_id)
 
