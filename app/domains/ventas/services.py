@@ -192,12 +192,7 @@ class VentaService:
         sku = sku_venta.sku
         precio = SkuPrecio.model_validate(sku.precio)
         precio_unitario = precio.vigente(today)
-        if data.descuento_unitario > precio_unitario:
-            raise cls._validation_error(
-                "items",
-                f"El descuento de {sku_venta.producto_nombre} ({data.descuento_unitario}) "
-                f"supera su precio unitario ({precio_unitario}).",
-            )
+        cls._validar_descuento_unitario(sku_venta.producto_nombre, data.descuento_unitario, precio_unitario)
         return {
             "sku_id": sku.id,
             "cantidad": data.cantidad,
@@ -210,6 +205,29 @@ class VentaService:
             "talla_etiqueta": sku_venta.talla_etiqueta,
             "codigo_barras": sku.codigo_barras,
         }
+
+    @classmethod
+    def _valores_ofrecidos(cls, data: VentaItemCreate, item: VentaItem) -> dict[str, Any]:
+        """
+        Valores de un ítem que ya estaba en la venta, sin recalcular precios:
+        conserva el precio y el snapshot con que se ofreció y solo cambia su
+        cantidad y su descuento.
+        """
+        cls._validar_descuento_unitario(item.producto_nombre, data.descuento_unitario, item.precio_unitario)
+        return {
+            "cantidad": data.cantidad,
+            "descuento_unitario": data.descuento_unitario,
+            "subtotal": (item.precio_unitario - data.descuento_unitario) * data.cantidad,
+        }
+
+    @classmethod
+    def _validar_descuento_unitario(cls, producto_nombre: str, descuento: Decimal, precio_unitario: Decimal) -> None:
+        if descuento > precio_unitario:
+            raise cls._validation_error(
+                "items",
+                f"El descuento de {producto_nombre} ({descuento}) "
+                f"supera su precio unitario ({precio_unitario}).",
+            )
 
     @staticmethod
     def _nuevo_item(
@@ -233,6 +251,21 @@ class VentaService:
             updated_by=actor.id,
             **valores,
         )
+
+    @staticmethod
+    def _actualizar_item(
+        item: VentaItem,
+        valores: dict[str, Any],
+        actor: CurrentUser,
+        now: datetime,
+    ) -> None:
+        """Aplica al ítem los valores recalculados que cambiaron; si nada cambió, no lo toca."""
+        cambios = {key: value for key, value in valores.items() if getattr(item, key) != value}
+        if cambios:
+            for key, value in cambios.items():
+                setattr(item, key, value)
+            item.updated_at = now
+            item.updated_by = actor.id
 
     @classmethod
     def _aplicar_totales(cls, venta: Venta, subtotales: Sequence[Decimal]) -> None:
@@ -346,9 +379,11 @@ class VentaService:
         settings: Settings,
     ) -> Venta:
         """
-        Reemplaza los ítems de una venta PENDIENTE y actualiza los datos
-        enviados. Rehace el snapshot y los precios de todos los ítems con los
-        datos actuales de sus SKUs y recalcula los totales.
+        Reemplaza los ítems de una venta PENDIENTE, actualiza los datos enviados
+        y recalcula los totales. Los ítems nuevos toman el precio y el snapshot
+        de su SKU actual. Los que ya estaban conservan los suyos, como en una
+        proforma, salvo con recalcular_precios, que los rehace todos con el
+        catálogo del día. Todos los SKUs enviados deben seguir activos.
         """
         venta = await cls.get(db_session, venta_id, actor, for_update=True, load_detail=True)
         if venta.estado != EstadoVenta.PENDIENTE:
@@ -362,20 +397,20 @@ class VentaService:
         nuevos: list[VentaItem] = []
         subtotales: list[Decimal] = []
         for item_data in data.items:
-            valores = cls._valores_item(item_data, skus[item_data.sku_id], today)
-            subtotales.append(valores["subtotal"])
             existente = actuales.pop(item_data.sku_id, None)
             if existente is None:
+                valores = cls._valores_item(item_data, skus[item_data.sku_id], today)
                 nuevos.append(cls._nuevo_item(venta, actor, now, len(nuevos), valores))
-                continue
-            cambios = {key: value for key, value in valores.items() if getattr(existente, key) != value}
-            if cambios:
-                for key, value in cambios.items():
-                    setattr(existente, key, value)
-                existente.updated_at = now
-                existente.updated_by = actor.id
+            else:
+                if data.recalcular_precios:
+                    valores = cls._valores_item(item_data, skus[item_data.sku_id], today)
+                else:
+                    valores = cls._valores_ofrecidos(item_data, existente)
+                cls._actualizar_item(existente, valores, actor, now)
+            subtotales.append(valores["subtotal"])
 
-        for field_name, value in data.model_dump(exclude_unset=True, exclude={"items"}).items():
+        datos_venta = data.model_dump(exclude_unset=True, exclude={"items", "recalcular_precios"})
+        for field_name, value in datos_venta.items():
             setattr(venta, field_name, value)
         cls._aplicar_totales(venta, subtotales)
         venta.updated_at = now
@@ -407,11 +442,16 @@ class VentaService:
         venta_id: UUID,
         data: VentaEstadoUpdate,
         actor: CurrentUser,
+        settings: Settings,
     ) -> Venta:
         """
-        PENDIENTE → CONFIRMADA descuenta el stock; PENDIENTE → CANCELADA no lo
-        toca; CONFIRMADA → CANCELADA lo devuelve y exige la acción DELETE de
-        ventas (anular una venta cobrada). CANCELADA es definitiva.
+        PENDIENTE → CONFIRMADA cobra la venta y descuenta el stock. Por defecto
+        la cobra como una proforma, tal como se ofreció; con recalcular_precios
+        antes rehace el snapshot y los precios de cada ítem con su SKU actual,
+        igual que PUT /items (conserva cantidades y descuentos), y recalcula
+        los totales. PENDIENTE → CANCELADA no toca el stock; CONFIRMADA
+        → CANCELADA lo devuelve y exige la acción DELETE de ventas (anular una
+        venta cobrada). Cancelar no recalcula nada. CANCELADA es definitiva.
         """
         venta = await cls.get(db_session, venta_id, actor, for_update=True, load_detail=True)
         destino = data.estado
@@ -437,6 +477,20 @@ class VentaService:
                     "Quítalos con PUT /ventas/{id}/items antes de confirmar.",
                     "items",
                 )
+            if data.recalcular_precios:
+                # Se cobra con el catálogo de hoy: precios, rebajas vigentes y nombres.
+                today = SkuService.local_today(settings)
+                subtotales: list[Decimal] = []
+                for item in venta.items:
+                    datos = VentaItemCreate(
+                        sku_id=item.sku_id,
+                        cantidad=item.cantidad,
+                        descuento_unitario=item.descuento_unitario,
+                    )
+                    valores = cls._valores_item(datos, skus[item.sku_id], today)
+                    cls._actualizar_item(item, valores, actor, now)
+                    subtotales.append(valores["subtotal"])
+                cls._aplicar_totales(venta, subtotales)
             cls._descontar_stock(skus, cantidades, actor.id, now)
             venta.confirmada_at = now
         else:

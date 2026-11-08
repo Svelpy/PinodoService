@@ -17,6 +17,7 @@ from app.shared.services.validators import (
     validator_barcode,
     validator_boolean,
     validator_date,
+    validator_integer,
     validator_non_negative_integer,
     validator_positive_money,
 )
@@ -108,72 +109,48 @@ class SkuStockInput(BaseModel):
     )
 
 
-class SkuPrecioUpdate(BaseModel):
-    """
-    Precio parcial del PATCH: solo cambia lo enviado y el resto se conserva.
-
-    rebajado: null quita la rebaja junto con su fecha. El service valida el
-    precio resultante con las reglas de SkuPrecio.
-    """
-
-    normal: Decimal | None = Field(default=None, max_digits=10, decimal_places=2)
-    rebajado: Decimal | None = Field(default=None, max_digits=10, decimal_places=2)
-    rebaja_hasta: date | None = Field(default=None)
-
-    @field_validator("normal", mode="before")
-    @classmethod
-    def validate_normal(cls, value: object) -> Decimal:
-        if value is None:
-            raise ValueError("El precio normal no puede ser null.")
-        return validator_positive_money(value)
-
-    @field_validator("rebajado", mode="before")
-    @classmethod
-    def validate_rebajado(cls, value: object) -> Decimal | None:
-        if value is None:
-            return None
-        return validator_positive_money(value)
-
-    @field_validator("rebaja_hasta", mode="before")
-    @classmethod
-    def validate_rebaja_hasta(cls, value: object) -> date | None:
-        if value is None:
-            return None
-        return validator_date(value)
-
-    model_config = ConfigDict(
-        extra="forbid",
-        json_schema_extra={
-            "example": {
-                "normal": 29.95,
-                "rebajado": 19.95,
-                "rebaja_hasta": "2026-12-31",
-            }
-        },
-    )
-
-
 class SkuStockUpdate(BaseModel):
-    """Stock parcial del PATCH: solo cambia lo enviado y el resto se conserva."""
+    """
+    Entrada de PATCH /skus/{id}/stock.
 
-    cantidad: int | None = Field(default=None, ge=0)
+    - ajuste: cuántas prendas entran (positivo, por ejemplo una recepción) o
+      salen (negativo, por ejemplo una merma). Se suma al stock actual con el
+      SKU bloqueado, así que nunca pisa lo que mueven las ventas. No puede ser
+      0 ni dejar el stock en negativo.
+    - minimo: stock a partir del cual el SKU aparece como bajo mínimo.
+
+    Se envía uno de los dos o ambos.
+    """
+
+    ajuste: int | None = Field(default=None)
     minimo: int | None = Field(default=None, ge=0)
 
-    @field_validator("cantidad", "minimo", mode="before")
+    @field_validator("ajuste", mode="before")
     @classmethod
-    def validate_non_negative(cls, value: object) -> int:
+    def validate_ajuste(cls, value: object) -> int:
         if value is None:
-            raise ValueError("El valor de stock no puede ser null.")
+            raise ValueError("El ajuste no puede ser null.")
+        ajuste = validator_integer(value)
+        if ajuste == 0:
+            raise ValueError("El ajuste no puede ser 0.")
+        return ajuste
+
+    @field_validator("minimo", mode="before")
+    @classmethod
+    def validate_minimo(cls, value: object) -> int:
+        if value is None:
+            raise ValueError("El mínimo no puede ser null.")
         return validator_non_negative_integer(value)
+
+    @model_validator(mode="after")
+    def validate_algo_que_cambiar(self) -> "SkuStockUpdate":
+        if self.ajuste is None and self.minimo is None:
+            raise ValueError("Envía ajuste, minimo o ambos.")
+        return self
 
     model_config = ConfigDict(
         extra="forbid",
-        json_schema_extra={
-            "example": {
-                "cantidad": 20,
-                "minimo": 3,
-            }
-        },
+        json_schema_extra={"example": {"ajuste": 5, "minimo": 2}},
     )
 
 
@@ -269,8 +246,8 @@ class SkuDetailUpdate(SkuDetailCreate):
       stock es opcional y vale 0 si se omite.
     - Con id: actualiza ese SKU. Solo cambian los campos enviados; precio se
       envía completo y reemplaza al anterior. No admite stock: el de un SKU que
-      ya existe se ajusta con PATCH /skus/{id}, para no pisar lo que las ventas
-      descontaron mientras el formulario estaba abierto.
+      ya existe se ajusta con PATCH /skus/{id}/stock, para no pisar lo que las
+      ventas descontaron mientras el formulario estaba abierto.
 
     Por esa exclusión, el ejemplo muestra una fila existente y omite stock.
     """
@@ -282,7 +259,7 @@ class SkuDetailUpdate(SkuDetailCreate):
     def validate_stock_solo_en_nuevas(self) -> "SkuDetailUpdate":
         if self.id is not None and self.stock is not None:
             raise ValueError(
-                "El stock de un SKU existente no se cambia aquí; usa PATCH /skus/{id}."
+                "El stock de un SKU existente no se cambia aquí; usa PATCH /skus/{id}/stock."
             )
         return self
 
@@ -295,68 +272,6 @@ class SkuDetailUpdate(SkuDetailCreate):
                 "is_visible": True,
                 "precio": {"normal": 29.95, "rebajado": 19.95, "rebaja_hasta": "2026-12-31"},
                 "id": "11111111-1111-4111-8111-111111111111",
-            }
-        },
-    )
-
-
-class SkuUpdate(BaseModel):
-    """
-    producto_color_id es la foreign key de dueño y no se modifica.
-
-    Dentro de precio y stock también cambia solo lo enviado.
-    """
-
-    talla_id: UUID | None = Field(default=None)
-    codigo_barras: str | None = Field(default=None, min_length=1, max_length=50)
-    is_visible: bool | None = Field(default=None)
-    precio: SkuPrecioUpdate | None = Field(default=None)
-    stock: SkuStockUpdate | None = Field(default=None)
-
-    @field_validator("talla_id")
-    @classmethod
-    def validate_talla_id(cls, value: UUID | None) -> UUID:
-        if value is None:
-            raise ValueError("La talla no puede ser null.")
-        return value
-
-    @field_validator("codigo_barras", mode="before")
-    @classmethod
-    def validate_codigo_barras(cls, value: object) -> str | None:
-        if value is None:
-            return None
-        return validator_barcode(value)
-
-    @field_validator("is_visible", mode="before")
-    @classmethod
-    def validate_is_visible(cls, value: object) -> bool:
-        if value is None:
-            raise ValueError("La visibilidad no puede ser null.")
-        return validator_boolean(value)
-
-    @field_validator("precio", mode="before")
-    @classmethod
-    def validate_precio(cls, value: object) -> object:
-        if value is None:
-            raise ValueError("El precio no puede ser null.")
-        return value
-
-    @field_validator("stock", mode="before")
-    @classmethod
-    def validate_stock(cls, value: object) -> object:
-        if value is None:
-            raise ValueError("El stock no puede ser null.")
-        return value
-
-    model_config = ConfigDict(
-        extra="forbid",
-        json_schema_extra={
-            "example": {
-                "talla_id": "99999999-9999-4999-8999-999999999999",
-                "codigo_barras": "8412345678905",
-                "is_visible": True,
-                "precio": {"normal": 29.95, "rebajado": 19.95, "rebaja_hasta": "2026-12-31"},
-                "stock": {"cantidad": 20, "minimo": 3},
             }
         },
     )

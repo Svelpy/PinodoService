@@ -7,6 +7,7 @@ from app.shared.services.validators import (
     validator_barcode,
     validator_boolean,
     validator_date,
+    validator_integer,
     validator_hex_color,
     validator_non_negative_money,
     validator_positive_money,
@@ -127,3 +128,15 @@ def test_non_negative_money_rechaza_invalidos(value: object) -> None:
 def test_positive_money_rechaza_cero_y_negativos(value: object) -> None:
     with pytest.raises(ValueError):
         validator_positive_money(value)
+
+
+
+@pytest.mark.parametrize("value", [-3, 0, 7])
+def test_validator_integer_acepta_enteros_con_signo(value: int) -> None:
+    assert validator_integer(value) == value
+
+
+@pytest.mark.parametrize("value", [True, "5", 1.5, None])
+def test_validator_integer_rechaza_booleanos_textos_y_decimales(value: object) -> None:
+    with pytest.raises(ValueError):
+        validator_integer(value)

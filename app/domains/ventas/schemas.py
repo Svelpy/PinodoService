@@ -8,11 +8,12 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 from app.domains.venta_items.schemas import VentaItemCreate, VentaItemResponse
 from app.shared.enums import CanalVenta, EstadoVenta, MetodoPago
 from app.shared.services.validators import (
+    validator_boolean,
     validator_non_empty_text,
     validator_non_negative_money,
     validator_phone,
@@ -141,6 +142,11 @@ class VentaItemsUpdate(BaseModel):
     que faltan se eliminan y los nuevos se crean. Los datos de la venta que se
     omiten no cambian; referencia, cliente_telefono y nota aceptan null para
     quitarlos. Subtotal y total se recalculan.
+
+    recalcular_precios, igual que al confirmar: por defecto (false) los ítems que
+    ya estaban conservan el precio y los nombres con que se ofrecieron y solo
+    cambian su cantidad y su descuento; los nuevos entran con el precio del día.
+    true actualiza todos los ítems con los precios y nombres del día.
     """
 
     canal: CanalVenta | None = Field(default=None)
@@ -150,6 +156,7 @@ class VentaItemsUpdate(BaseModel):
     descuento: Decimal | None = Field(default=None, max_digits=12, decimal_places=2)
     nota: str | None = Field(default=None, min_length=1)
     items: list[VentaItemCreate] = Field(..., min_length=1, max_length=MAX_ITEMS_POR_VENTA)
+    recalcular_precios: bool = Field(default=False)
 
     @field_validator("canal")
     @classmethod
@@ -192,6 +199,13 @@ class VentaItemsUpdate(BaseModel):
     def validate_items(cls, value: list[VentaItemCreate]) -> list[VentaItemCreate]:
         return _validate_items(value)
 
+    @field_validator("recalcular_precios", mode="before")
+    @classmethod
+    def validate_recalcular_precios(cls, value: object) -> bool:
+        if value is None:
+            raise ValueError("recalcular_precios no puede ser null.")
+        return validator_boolean(value)
+
     model_config = ConfigDict(
         extra="forbid",
         json_schema_extra={
@@ -203,6 +217,7 @@ class VentaItemsUpdate(BaseModel):
                 "descuento": 0,
                 "nota": "Cambió la talla a M.",
                 "items": [VentaItemCreate.model_config["json_schema_extra"]["example"]],
+                "recalcular_precios": False,
             }
         },
     )
@@ -213,9 +228,15 @@ class VentaEstadoUpdate(BaseModel):
     Entrada de PATCH /ventas/{id}/estado. CONFIRMADA cobra la venta y fija
     confirmada_at; CANCELADA la anula y fija cancelada_at. Las transiciones
     válidas las comprueba el service.
+
+    recalcular_precios solo se usa al confirmar. Por defecto (false) la venta
+    pendiente se cobra como una proforma: tal como se ofreció, con sus precios,
+    descuentos y total. true la actualiza antes de cobrar con los precios y
+    nombres del día, igual que recalcular_precios en PUT /items.
     """
 
     estado: EstadoVenta = Field(...)
+    recalcular_precios: bool = Field(default=False)
 
     @field_validator("estado")
     @classmethod
@@ -226,9 +247,22 @@ class VentaEstadoUpdate(BaseModel):
             raise ValueError("El estado solo puede cambiar a CONFIRMADA o CANCELADA.")
         return value
 
+    @field_validator("recalcular_precios", mode="before")
+    @classmethod
+    def validate_recalcular_precios(cls, value: object) -> bool:
+        if value is None:
+            raise ValueError("recalcular_precios no puede ser null.")
+        return validator_boolean(value)
+
+    @model_validator(mode="after")
+    def validate_recalcular_solo_al_confirmar(self) -> "VentaEstadoUpdate":
+        if "recalcular_precios" in self.model_fields_set and self.estado != EstadoVenta.CONFIRMADA:
+            raise ValueError("recalcular_precios solo se envía al confirmar la venta.")
+        return self
+
     model_config = ConfigDict(
         extra="forbid",
-        json_schema_extra={"example": {"estado": "CONFIRMADA"}},
+        json_schema_extra={"example": {"estado": "CONFIRMADA", "recalcular_precios": True}},
     )
 
 

@@ -107,10 +107,16 @@ def validator_boolean(value: object) -> bool:
     return value
 
 
-def validator_non_negative_integer(value: object) -> int:
-    """Valida un entero mayor o igual a cero sin aceptar booleanos."""
+def validator_integer(value: object) -> int:
+    """Valida un entero, positivo o negativo, sin aceptar booleanos ni textos."""
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError("El valor debe ser un número entero.")
+    return value
+
+
+def validator_non_negative_integer(value: object) -> int:
+    """Valida un entero mayor o igual a cero sin aceptar booleanos."""
+    value = validator_integer(value)
     if value < 0:
         raise ValueError("El valor debe ser mayor o igual a cero.")
     return value

@@ -153,10 +153,14 @@ async def get_venta_audit(
     description=(
         "Solo para ventas PENDIENTE. items reemplaza la lista completa: los SKUs "
         "que siguen se actualizan, los que faltan se eliminan y los nuevos se "
-        "crean. El snapshot y los precios de todos los ítems se rehacen con los "
-        "datos actuales de sus SKUs y se recalculan los totales. canal, "
-        "metodo_pago, descuento, referencia, cliente_telefono y nota solo cambian "
-        "si se envían." + SCOPE_DESCRIPTION
+        "crean. Por defecto la venta se trata como una proforma: los ítems que ya "
+        "estaban conservan el precio y los nombres con que se ofrecieron y solo "
+        "cambian su cantidad y su descuento; los nuevos entran con el precio del "
+        "día. Con recalcular_precios=true todos los ítems toman los precios y "
+        "nombres del día (422 si un descuento ya no cabe). Los totales siempre se "
+        "recalculan. canal, metodo_pago, descuento, referencia, cliente_telefono y "
+        "nota solo cambian si se envían. Un SKU eliminado del catálogo responde "
+        "422 hasta quitarlo." + SCOPE_DESCRIPTION
     ),
     responses=_error_responses(401, 403, 404, 409, 422, 500),
 )
@@ -178,8 +182,12 @@ async def replace_venta_items(
     response_model=VentaDetail,
     summary="Confirmar o cancelar venta",
     description=(
-        "CONFIRMADA cobra una venta pendiente: descuenta el stock y fija "
-        "confirmada_at (409 si no alcanza el stock o algún SKU fue eliminado). "
+        "CONFIRMADA cobra una venta pendiente, descuenta el stock y fija "
+        "confirmada_at. Por defecto la cobra como una proforma, tal como se "
+        "ofreció. Con recalcular_precios: true antes la actualiza con los precios "
+        "y nombres del día (conserva cantidades y descuentos); 422 si un "
+        "descuento ya no cabe en el precio nuevo. 409 si no alcanza el stock o "
+        "algún SKU fue eliminado. recalcular_precios solo se envía al confirmar. "
         "CANCELADA anula la venta y fija cancelada_at; si estaba confirmada, "
         "devuelve el stock y exige permiso para anular ventas cobradas (un "
         "CAJERO solo cancela pendientes). Una venta cancelada no cambia más."
@@ -195,5 +203,6 @@ async def change_venta_estado(
         Depends(require_permission(Module.VENTA, Action.UPDATE)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> VentaDetail:
-    return await VentaService.change_estado(db_session, venta_id, data, current_user)
+    return await VentaService.change_estado(db_session, venta_id, data, current_user, settings)

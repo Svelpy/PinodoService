@@ -131,7 +131,7 @@ def test_patch_rechaza_null(campo: str) -> None:
 
 
 def test_fila_existente_no_admite_stock_y_la_nueva_si() -> None:
-    with pytest.raises(ValidationError, match="PATCH /skus"):
+    with pytest.raises(ValidationError, match="PATCH /skus/{id}/stock"):
         SkuDetailUpdate.model_validate(
             {"id": str(uuid4()), "talla_id": str(uuid4()), "precio": PRECIO, "stock": {"cantidad": 1}}
         )

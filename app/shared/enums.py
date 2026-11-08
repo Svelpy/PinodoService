@@ -38,6 +38,14 @@ class TipoImagen(str, Enum):
 
 
 
+class OrdenTienda(str, Enum):
+    """Orden del listado de productos de la tienda pública."""
+
+    NOVEDADES = "NOVEDADES"
+    PRECIO_ASC = "PRECIO_ASC"
+    PRECIO_DESC = "PRECIO_DESC"
+
+
 class CanalVenta(str, Enum):
     WHATSAPP = "WHATSAPP"
     TIENDA = "TIENDA"

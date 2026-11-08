@@ -114,6 +114,8 @@ def test_venta_items_update_solo_marca_lo_enviado() -> None:
         {"metodo_pago": None},
         {"descuento": None},
         {"estado": "CONFIRMADA"},
+        {"recalcular_precios": None},
+        {"recalcular_precios": "quizas"},
     ],
 )
 def test_venta_items_update_rechaza_invalidos(overrides: dict[str, object]) -> None:
@@ -121,6 +123,13 @@ def test_venta_items_update_rechaza_invalidos(overrides: dict[str, object]) -> N
 
     with pytest.raises(ValidationError):
         VentaItemsUpdate.model_validate(data)
+
+
+def test_venta_items_update_por_defecto_no_recalcula_precios() -> None:
+    data = VentaItemsUpdate.model_validate({"items": [_item()]})
+
+    assert data.recalcular_precios is False
+    assert VentaItemsUpdate.model_validate({"items": [_item()], "recalcular_precios": True}).recalcular_precios
 
 
 def test_venta_items_update_exige_items() -> None:
@@ -159,3 +168,30 @@ def test_ejemplo_de_detail_es_coherente() -> None:
     assert detail.total == detail.subtotal - detail.descuento
     assert detail.estado == EstadoVenta.CANCELADA
     assert detail.confirmada_at is not None and detail.cancelada_at is not None
+
+
+# ---------------------------------------------------------------- estado
+
+
+def test_estado_update_por_defecto_no_recalcula_precios() -> None:
+    from app.domains.ventas.schemas import VentaEstadoUpdate
+
+    assert VentaEstadoUpdate.model_validate({"estado": "CONFIRMADA"}).recalcular_precios is False
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"estado": "CANCELADA", "recalcular_precios": True},
+        {"estado": "CANCELADA", "recalcular_precios": False},
+        {"estado": "CONFIRMADA", "recalcular_precios": None},
+        {"estado": "CONFIRMADA", "recalcular_precios": "true"},
+    ],
+)
+def test_estado_update_recalcular_solo_al_confirmar_y_booleano(body: dict[str, object]) -> None:
+    from pydantic import ValidationError
+
+    from app.domains.ventas.schemas import VentaEstadoUpdate
+
+    with pytest.raises(ValidationError):
+        VentaEstadoUpdate.model_validate(body)

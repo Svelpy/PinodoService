@@ -14,7 +14,7 @@ from app.domains.skus.schemas import (
     SkuDetail,
     SkuInventarioItem,
     SkuResponseAudit,
-    SkuUpdate,
+    SkuStockUpdate,
 )
 from app.domains.skus.services import SkuService
 from app.shared.enums import Action, Module
@@ -173,22 +173,23 @@ async def get_sku_audit(
 
 
 @router.patch(
-    "/{sku_id}",
+    "/{sku_id}/stock",
     response_model=SkuDetail,
-    summary="Actualizar SKU",
+    summary="Ajustar stock de un SKU",
     description=(
-        "Solo cambia lo enviado, también dentro de precio y stock: por ejemplo, "
-        "{\"stock\": {\"cantidad\": 5}} conserva el mínimo. precio.rebajado: null "
-        "quita la rebaja y su fecha. El precio resultante debe cumplir las mismas "
-        "reglas que al crear. Al enviar stock se renueva su fecha de "
-        "actualización. codigo_barras acepta null para quitarlo. El color del "
-        "producto no se puede cambiar."
+        "ajuste es cuántas prendas entran (positivo, por ejemplo una recepción) o "
+        "salen (negativo, por ejemplo una merma); se suma al stock actual, así "
+        "que nunca pisa lo que mueven las ventas. No puede ser 0, y si el stock "
+        "quedara negativo responde 409 con stock_actual en details. minimo es "
+        "el stock a partir del cual el SKU aparece como bajo mínimo. Se envía "
+        "uno de los dos o ambos. Las ventas pendientes no reservan stock. "
+        "Responde el SKU, igual que GET /skus/{id}."
     ),
     responses=_error_responses(401, 403, 404, 409, 422, 500),
 )
-async def update_sku(
+async def update_sku_stock(
     sku_id: UUID,
-    data: SkuUpdate,
+    data: SkuStockUpdate,
     current_user: Annotated[
         CurrentUser,
         Depends(require_permission(Module.SKU, Action.UPDATE)),
@@ -196,7 +197,7 @@ async def update_sku(
     db_session: Annotated[AsyncSession, Depends(get_db)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> SkuDetail:
-    sku = await SkuService.update(db_session, sku_id, data, current_user.id)
+    sku = await SkuService.update_stock(db_session, sku_id, data, current_user.id)
     return SkuService.detail(sku, settings)
 
 

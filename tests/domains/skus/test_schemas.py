@@ -13,7 +13,6 @@ from app.domains.skus.schemas import (
     SkuListItem,
     SkuPrecio,
     SkuResponse,
-    SkuUpdate,
 )
 from app.domains.tallas.models import Talla
 
@@ -72,21 +71,6 @@ def test_sku_precio_rechaza_invalidos(precio: dict[str, object]) -> None:
 def test_sku_stock_rechaza_invalidos(stock: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         SkuCreate.model_validate(_create_data(stock=stock))
-
-
-def test_sku_update_no_permite_cambiar_dueno() -> None:
-    with pytest.raises(ValidationError):
-        SkuUpdate.model_validate({"producto_color_id": str(uuid4())})
-
-
-@pytest.mark.parametrize("field", ["talla_id", "is_visible", "precio", "stock"])
-def test_sku_update_rechaza_null_en_campos_no_nullable(field: str) -> None:
-    with pytest.raises(ValidationError):
-        SkuUpdate.model_validate({field: None})
-
-
-def test_sku_update_permite_limpiar_codigo_barras() -> None:
-    assert SkuUpdate(codigo_barras=None).model_dump(exclude_unset=True) == {"codigo_barras": None}
 
 
 def test_sku_response_desde_modelo() -> None:
@@ -166,24 +150,38 @@ def test_sku_detail_conserva_precio_vigente_ya_calculado() -> None:
     assert again.precio_vigente == Decimal("80.0")
 
 
+# --- PATCH /skus/{id}/stock ---------------------------------------------------
+
+from app.domains.skus.schemas import SkuStockUpdate  # noqa: E402
+
+
+def test_stock_update_ejemplo_valida() -> None:
+    SkuStockUpdate.model_validate(SkuStockUpdate.model_config["json_schema_extra"]["example"])
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"ajuste": 5}, {"ajuste": -2}, {"ajuste": -1, "minimo": 1}, {"minimo": 3}, {"minimo": 0}],
+)
+def test_stock_update_acepta_ajuste_minimo_o_ambos(body: dict[str, object]) -> None:
+    SkuStockUpdate.model_validate(body)
+
+
 @pytest.mark.parametrize(
     "body",
     [
-        {"stock": {"cantidad": None}},
-        {"stock": {"cantidad": -1}},
-        {"stock": {"actualizado": "2026-01-01T00:00:00Z"}},
-        {"precio": {"normal": None}},
-        {"precio": {"normal": 0}},
-        {"precio": {"normal": 1.999}},
+        {},
+        {"ajuste": 0},
+        {"ajuste": True},
+        {"ajuste": "5"},
+        {"ajuste": 1.5},
+        {"ajuste": None},
+        {"minimo": -1},
+        {"minimo": None},
+        {"cantidad": 9},
+        {"cantidad_anterior": 4, "cantidad": 9},
     ],
 )
-def test_sku_update_parcial_rechaza_valores_invalidos(body: dict[str, object]) -> None:
+def test_stock_update_rechaza_valores_invalidos(body: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
-        SkuUpdate.model_validate(body)
-
-
-def test_sku_update_parcial_conserva_solo_lo_enviado() -> None:
-    data = SkuUpdate.model_validate({"stock": {"minimo": 4}, "precio": {"rebajado": None}})
-
-    assert data.stock.model_dump(exclude_unset=True) == {"minimo": 4}
-    assert data.precio.model_dump(exclude_unset=True) == {"rebajado": None}
+        SkuStockUpdate.model_validate(body)

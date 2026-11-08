@@ -7,7 +7,7 @@ from app.domains.producto_colores.models import ProductoColor
 from app.domains.producto_colores.repositories import ProductoColorRepository
 from app.domains.skus.models import Sku
 from app.domains.skus.repositories import SkuRepository
-from app.domains.skus.schemas import SkuCreate, SkuResponse, SkuUpdate
+from app.domains.skus.schemas import SkuCreate, SkuResponse
 from app.domains.skus.services import SkuService
 from app.domains.tallas.models import Talla
 from app.domains.tallas.repositories import TallaRepository
@@ -167,95 +167,6 @@ async def test_create_rechaza_codigo_de_barras_repetido() -> None:
 
 
 @pytest.mark.asyncio
-async def test_update_stock_renueva_la_fecha_y_conserva_el_precio() -> None:
-    sku = _sku()
-    precio_original = dict(sku.precio)
-    actor_id = uuid4()
-
-    with patch.object(SkuService, "get", new=AsyncMock(return_value=sku)):
-        result = await SkuService.update(
-            _session(),
-            sku.id,
-            SkuUpdate.model_validate({"stock": {"cantidad": 0, "minimo": 2}}),
-            actor_id,
-        )
-
-    assert result.stock["cantidad"] == 0
-    assert result.stock["actualizado"] is not None
-    assert result.precio == precio_original
-    assert result.updated_by == actor_id
-
-
-@pytest.mark.asyncio
-async def test_update_precio_no_toca_el_stock() -> None:
-    sku = _sku()
-    stock_original = dict(sku.stock)
-
-    with patch.object(SkuService, "get", new=AsyncMock(return_value=sku)):
-        result = await SkuService.update(
-            _session(),
-            sku.id,
-            SkuUpdate.model_validate({"precio": {"normal": 35, "rebajado": 25}}),
-            uuid4(),
-        )
-
-    assert result.precio == {"normal": 35.0, "rebajado": 25.0, "rebaja_hasta": None}
-    assert result.stock == stock_original
-
-
-@pytest.mark.asyncio
-async def test_update_codigo_barras_null_lo_quita_sin_validar_unicidad() -> None:
-    sku = _sku()
-
-    with (
-        patch.object(SkuService, "get", new=AsyncMock(return_value=sku)),
-        patch.object(SkuRepository, "get_active_by_codigo_barras", new=AsyncMock()) as by_codigo,
-    ):
-        result = await SkuService.update(
-            _session(),
-            sku.id,
-            SkuUpdate(codigo_barras=None),
-            uuid4(),
-        )
-
-    by_codigo.assert_not_awaited()
-    assert result.codigo_barras is None
-
-
-@pytest.mark.asyncio
-async def test_update_talla_valida_unicidad_en_el_mismo_color() -> None:
-    sku = _sku()
-    nueva = Talla(etiqueta="L")
-
-    with (
-        patch.object(SkuService, "get", new=AsyncMock(return_value=sku)),
-        patch.object(TallaRepository, "get_by_id", new=AsyncMock(return_value=nueva)),
-        patch.object(
-            SkuRepository,
-            "get_active_by_color_and_talla",
-            new=AsyncMock(return_value=_sku()),
-        ) as unique,
-    ):
-        with pytest.raises(AppException) as error:
-            await SkuService.update(_session(), sku.id, SkuUpdate(talla_id=nueva.id), uuid4())
-
-    unique.assert_awaited_once_with(sku.producto_color_id, nueva.id, exclude_id=sku.id)
-    assert error.value.status_code == 409
-
-
-@pytest.mark.asyncio
-async def test_update_vacio_no_hace_commit() -> None:
-    sku = _sku()
-    session = _session()
-
-    with patch.object(SkuService, "get", new=AsyncMock(return_value=sku)):
-        result = await SkuService.update(session, sku.id, SkuUpdate(), uuid4())
-
-    assert result is sku
-    session.commit.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_delete_es_logico() -> None:
     sku = _sku()
     actor_id = uuid4()
@@ -278,128 +189,46 @@ async def test_get_inexistente_responde_404() -> None:
     assert error.value.status_code == 404
 
 
-# --- PATCH parcial dentro de precio y stock ---------------------------------
+# --- Precio completo del PATCH del color: regla de rebaja vencida -----------
 
-def _sku_rebajado() -> Sku:
-    return _sku(
-        precio={"normal": 29.95, "rebajado": 19.95, "rebaja_hasta": "2026-12-31"},
-        stock={"cantidad": 5, "minimo": 3, "actualizado": None},
-    )
-
-
-async def _update(sku: Sku, body: dict[str, object]) -> Sku:
-    with patch.object(SkuService, "get", new=AsyncMock(return_value=sku)):
-        return await SkuService.update(_session(), sku.id, SkuUpdate.model_validate(body), uuid4())
-
-
-@pytest.mark.asyncio
-async def test_update_solo_cantidad_conserva_el_minimo() -> None:
-    result = await _update(_sku_rebajado(), {"stock": {"cantidad": 9}})
-
-    assert (result.stock["cantidad"], result.stock["minimo"]) == (9, 3)
-    assert result.stock["actualizado"] is not None
-
-
-@pytest.mark.asyncio
-async def test_update_solo_normal_conserva_la_rebaja() -> None:
-    result = await _update(_sku_rebajado(), {"precio": {"normal": 35}})
-
-    assert result.precio == {"normal": 35.0, "rebajado": 19.95, "rebaja_hasta": "2026-12-31"}
-
-
-@pytest.mark.asyncio
-async def test_update_rebajado_null_quita_la_rebaja_y_su_fecha() -> None:
-    result = await _update(_sku_rebajado(), {"precio": {"rebajado": None}})
-
-    assert result.precio == {"normal": 29.95, "rebajado": None, "rebaja_hasta": None}
-
-
-@pytest.mark.asyncio
-async def test_update_valida_el_precio_resultante() -> None:
-    session = _session()
-    sku = _sku_rebajado()
-
-    with patch.object(SkuService, "get", new=AsyncMock(return_value=sku)):
-        with pytest.raises(AppException) as error:
-            # 15 deja al normal por debajo del rebajado guardado (19.95).
-            await SkuService.update(
-                session, sku.id, SkuUpdate.model_validate({"precio": {"normal": 15}}), uuid4()
-            )
-
-    assert error.value.status_code == 422
-    assert error.value.details == {
-        "precio": "El precio rebajado debe ser menor que el precio normal."
-    }
-    session.commit.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_update_rechaza_rebaja_hasta_sin_rebaja() -> None:
-    with pytest.raises(AppException) as error:
-        await _update(_sku(), {"precio": {"rebaja_hasta": "2026-12-31"}})
-
-    assert "precio" in error.value.details
-
-
-def _con_rebaja_vencida() -> Sku:
+def _ayer() -> str:
     from datetime import timedelta
 
     from app.core.config import get_settings
 
-    ayer = SkuService.local_today(get_settings()) - timedelta(days=1)
-    return _sku(precio={"normal": 100.0, "rebajado": 80.0, "rebaja_hasta": ayer.isoformat()})
+    return (SkuService.local_today(get_settings()) - timedelta(days=1)).isoformat()
 
 
-@pytest.mark.asyncio
-async def test_update_nueva_rebaja_no_hereda_una_fecha_vencida() -> None:
-    session = _session()
-    sku = _con_rebaja_vencida()
+def test_replace_precio_rechaza_una_rebaja_nueva_con_fecha_vencida() -> None:
+    from app.domains.skus.schemas import SkuPrecio
 
-    with patch.object(SkuService, "get", new=AsyncMock(return_value=sku)):
-        with pytest.raises(AppException) as error:
-            await SkuService.update(
-                session, sku.id, SkuUpdate.model_validate({"precio": {"rebajado": 70}}), uuid4()
-            )
+    actual = {"normal": 100.0, "rebajado": None, "rebaja_hasta": None}
+    with pytest.raises(AppException) as error:
+        SkuService.replace_precio(actual, SkuPrecio(normal=100, rebajado=70, rebaja_hasta=_ayer()))
 
     assert error.value.status_code == 422
     assert "ya pasó" in error.value.details["precio"]
-    session.commit.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_update_nueva_rebaja_con_fecha_nueva_o_sin_fecha() -> None:
-    con_fecha = await _update(
-        _con_rebaja_vencida(),
-        {"precio": {"rebajado": 70, "rebaja_hasta": "2099-01-31"}},
-    )
-    sin_fecha = await _update(
-        _con_rebaja_vencida(),
-        {"precio": {"rebajado": 70, "rebaja_hasta": None}},
-    )
+def test_replace_precio_sin_tocar_la_rebaja_no_exige_su_fecha() -> None:
+    from app.domains.skus.schemas import SkuPrecio
 
-    assert con_fecha.precio["rebaja_hasta"] == "2099-01-31"
-    assert sin_fecha.precio == {"normal": 100.0, "rebajado": 70.0, "rebaja_hasta": None}
+    # Cambiar solo el normal de un SKU con una rebaja vieja sigue funcionando.
+    actual = {"normal": 100.0, "rebajado": 80.0, "rebaja_hasta": _ayer()}
+    nuevo = SkuService.replace_precio(actual, SkuPrecio(normal=120, rebajado=80, rebaja_hasta=_ayer()))
+
+    assert nuevo == {"normal": 120.0, "rebajado": 80.0, "rebaja_hasta": _ayer()}
 
 
-@pytest.mark.asyncio
-async def test_update_sin_tocar_la_rebaja_no_exige_su_fecha() -> None:
-    # Cambiar solo el precio normal de un SKU con una rebaja vieja sigue funcionando.
-    result = await _update(_con_rebaja_vencida(), {"precio": {"normal": 120}})
+def test_replace_precio_reemplaza_completo() -> None:
+    from app.domains.skus.schemas import SkuPrecio
 
-    assert result.precio["normal"] == 120.0
-
-
-@pytest.mark.asyncio
-async def test_update_sin_cambios_reales_no_renueva_la_fecha_del_stock() -> None:
-    session = _session()
-    sku = _sku_rebajado()
-
-    with patch.object(SkuService, "get", new=AsyncMock(return_value=sku)):
-        body = {"stock": {}, "precio": {"normal": 29.95}}
-        result = await SkuService.update(session, sku.id, SkuUpdate.model_validate(body), uuid4())
-
-    assert result.stock["actualizado"] is None
-    session.commit.assert_not_awaited()
+    actual = {"normal": 100.0, "rebajado": 80.0, "rebaja_hasta": "2099-01-31"}
+    assert SkuService.replace_precio(actual, SkuPrecio(normal=90)) == {
+        "normal": 90.0,
+        "rebajado": None,
+        "rebaja_hasta": None,
+    }
 
 
 # --- Inventario ---------------------------------------------------------------
@@ -491,3 +320,90 @@ async def test_sugerir_codigo_barras_falla_si_no_encuentra_uno_libre() -> None:
         await SkuService.sugerir_codigo_barras(_session())
 
     assert error.value.status_code == 500
+
+
+# --- PATCH /skus/{id}/stock ---------------------------------------------------
+
+from app.domains.skus.schemas import SkuStockUpdate  # noqa: E402
+
+
+async def _update_stock(sku: Sku, body: dict[str, object], session: MagicMock | None = None) -> object:
+    def get(*_: object, load_detail: bool = False, **__: object) -> object:
+        return "detail" if load_detail else sku
+
+    with patch.object(SkuService, "get", new=AsyncMock(side_effect=get)) as get_mock:
+        result = await SkuService.update_stock(
+            session or _session(), sku.id, SkuStockUpdate.model_validate(body), uuid4()
+        )
+    # Bloquea el SKU igual que las ventas.
+    assert get_mock.await_args_list[0].kwargs == {"for_update": True}
+    return result
+
+
+@pytest.mark.asyncio
+async def test_ajuste_suma_y_resta_sobre_el_stock_actual() -> None:
+    sku = _sku()  # cantidad 5, mínimo 2
+    session = _session()
+
+    result = await _update_stock(sku, {"ajuste": 3}, session)  # recepción
+    assert result == "detail"
+    assert (sku.stock["cantidad"], sku.stock["minimo"]) == (8, 2)
+    assert sku.stock["actualizado"] is not None
+
+    await _update_stock(sku, {"ajuste": -8})  # salen todas
+    assert sku.stock["cantidad"] == 0
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ajuste_se_aplica_sobre_lo_que_dejaron_las_ventas() -> None:
+    # La pantalla mostraba 5, pero una venta dejó 4: el ajuste +5 deja 9, sin pisar la venta.
+    sku = _sku(stock={"cantidad": 4, "minimo": 2, "actualizado": None})
+
+    await _update_stock(sku, {"ajuste": 5})
+
+    assert sku.stock["cantidad"] == 9
+
+
+@pytest.mark.asyncio
+async def test_ajuste_que_deja_stock_negativo_responde_409_con_el_stock_actual() -> None:
+    sku = _sku()
+    session = _session()
+
+    with pytest.raises(AppException) as error:
+        await _update_stock(sku, {"ajuste": -6}, session)
+
+    assert error.value.status_code == 409
+    assert error.value.details["stock_actual"] == 5
+    assert "ajuste" in error.value.details
+    assert sku.stock["cantidad"] == 5
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ajuste_y_minimo_juntos() -> None:
+    sku = _sku()
+
+    await _update_stock(sku, {"ajuste": -1, "minimo": 3})
+
+    assert (sku.stock["cantidad"], sku.stock["minimo"]) == (4, 3)
+
+
+@pytest.mark.asyncio
+async def test_solo_minimo_conserva_la_cantidad() -> None:
+    sku = _sku()
+
+    await _update_stock(sku, {"minimo": 4})
+
+    assert (sku.stock["cantidad"], sku.stock["minimo"]) == (5, 4)
+
+
+@pytest.mark.asyncio
+async def test_mismo_minimo_sin_ajuste_no_guarda_ni_renueva_la_fecha() -> None:
+    sku = _sku()
+    session = _session()
+
+    await _update_stock(sku, {"minimo": 2}, session)
+
+    assert sku.stock["actualizado"] is None
+    session.commit.assert_not_awaited()

@@ -11,6 +11,7 @@ from app.domains.productos.routes import router as productos_router
 from app.domains.secciones.routes import router as secciones_router
 from app.domains.skus.routes import router as skus_router
 from app.domains.tallas.routes import router as tallas_router
+from app.domains.tienda.routes import router as tienda_router
 from app.domains.usuarios.routes import router as usuarios_router
 from app.domains.ventas.routes import router as ventas_router
 
@@ -28,6 +29,7 @@ no_system_router.include_router(producto_colores_router)
 no_system_router.include_router(imagenes_router)
 no_system_router.include_router(skus_router)
 no_system_router.include_router(ventas_router)
+no_system_router.include_router(tienda_router)
 
 
 api_router = APIRouter()

@@ -116,7 +116,7 @@ async def get_producto_color_audit(
         "nuevas se suben antes con POST /imagenes/uploads. En skus, una fila con "
         "id actualiza ese SKU (solo los campos enviados; precio completo) y una "
         "sin id crea uno nuevo; un SKU que no se envía no cambia. Las filas con "
-        "id no aceptan stock: se ajusta con PATCH /skus/{id}. sku_ids_eliminar "
+        "id no aceptan stock: se ajusta con PATCH /skus/{id}/stock. sku_ids_eliminar "
         "elimina SKUs del color y libera su talla y su código de barras para "
         "las filas de la misma petición. Responde la ficha del color, igual que "
         "GET /producto-colores/{id}."

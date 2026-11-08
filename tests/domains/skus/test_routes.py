@@ -127,19 +127,6 @@ def test_create_rechaza_precios_invalidos(
     assert response.status_code == 422
 
 
-def test_patch_rechaza_cambiar_el_color_y_stock_null(
-    route_context: tuple[TestClient, CurrentUser, MagicMock],
-) -> None:
-    client, _, _ = route_context
-
-    assert client.patch(f"/skus/{uuid4()}", json={"producto_color_id": str(uuid4())}).status_code == 422
-    assert client.patch(f"/skus/{uuid4()}", json={"stock": None}).status_code == 422
-    assert client.patch(
-        f"/skus/{uuid4()}",
-        json={"stock": {"cantidad": 1, "minimo": 0, "actualizado": "2026-01-01"}},
-    ).status_code == 422
-
-
 def test_audit_y_delete(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
@@ -222,3 +209,49 @@ def test_sugerir_codigo_barras_exige_permiso_de_crear_skus(
     current_user.rol = Role.CAJERO
 
     assert client.post("/skus/sugerir-codigo-barras").status_code == 403
+
+
+def test_patch_stock_pasa_el_actor_y_responde_el_detail(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, current_user, db_session = route_context
+    sku = Sku(
+        producto_color_id=uuid4(),
+        talla_id=uuid4(),
+        precio={"normal": 29.95, "rebajado": None, "rebaja_hasta": None},
+        stock={"cantidad": 8, "minimo": 2, "actualizado": None},
+    )
+
+    with patch.object(
+        SkuService,
+        "update_stock",
+        new=AsyncMock(return_value=SimpleNamespace(**sku.model_dump(), talla=Talla(etiqueta="M"))),
+    ) as service:
+        response = client.patch(f"/skus/{sku.id}/stock", json={"ajuste": 3})
+
+    assert response.status_code == 200
+    assert service.await_args.args[0] is db_session
+    assert service.await_args.args[2].ajuste == 3
+    assert service.await_args.args[3] == current_user.id
+    assert response.json()["stock"]["cantidad"] == 8
+
+
+def test_patch_stock_no_acepta_cantidad(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, _, _ = route_context
+
+    response = client.patch(
+        f"/skus/{uuid4()}/stock",
+        json={"cantidad": 9},
+    )
+
+    assert response.status_code == 422
+
+
+def test_ya_no_existe_patch_del_sku(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, _, _ = route_context
+
+    assert client.patch(f"/skus/{uuid4()}", json={"is_visible": False}).status_code == 405

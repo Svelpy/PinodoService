@@ -1,10 +1,9 @@
 import secrets
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any, TypeVar
+from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,11 +19,9 @@ from app.domains.skus.schemas import (
     SkuInventarioItem,
     SkuListItem,
     SkuPrecio,
-    SkuPrecioUpdate,
     SkuResponse,
     SkuStockInput,
     SkuStockUpdate,
-    SkuUpdate,
 )
 from app.domains.tallas.repositories import TallaRepository
 from app.shared.errors.codes import ErrorCode
@@ -34,8 +31,6 @@ from app.shared.services.validators import validator_barcode
 
 
 logger = get_logger(__name__)
-
-ModelT = TypeVar("ModelT", bound=BaseModel)
 
 # GS1 reserva los prefijos 20-29 para códigos de uso interno de cada tienda:
 # nunca coinciden con el código de un producto de fabricante.
@@ -111,32 +106,6 @@ class SkuService:
         """El stock se guarda con la fecha de su última modificación."""
         return {**stock.model_dump(), "actualizado": utc_now().isoformat()}
 
-    @staticmethod
-    def _merged(schema: type[ModelT], field_name: str, values: dict[str, Any]) -> ModelT:
-        """Valida el valor resultante de combinar lo guardado con lo enviado."""
-        try:
-            return schema.model_validate(values)
-        except ValidationError as error:
-            item = error.errors()[0]
-            message = str((item.get("ctx") or {}).get("error") or item["msg"])
-            raise AppException(
-                message,
-                422,
-                ErrorCode.VALIDATION_ERROR,
-                {field_name: message},
-            ) from error
-
-    @classmethod
-    def _merge_precio(cls, current: dict[str, Any], update: SkuPrecioUpdate) -> SkuPrecio:
-        changes = update.model_dump(exclude_unset=True)
-        if "rebajado" in changes and changes["rebajado"] is None:
-            # Quitar la rebaja quita también su fecha.
-            changes["rebaja_hasta"] = None
-        precio = cls._merged(SkuPrecio, "precio", {**current, **changes})
-        if "rebajado" in changes or "rebaja_hasta" in changes:
-            cls._validate_rebaja_no_vencida(precio)
-        return precio
-
     @classmethod
     def _validate_rebaja_no_vencida(cls, precio: SkuPrecio) -> None:
         """
@@ -160,15 +129,6 @@ class SkuService:
         if any(nuevo[key] != current.get(key) for key in ("rebajado", "rebaja_hasta")):
             cls._validate_rebaja_no_vencida(precio)
         return nuevo
-
-    @classmethod
-    def _merge_stock(cls, current: dict[str, Any], update: SkuStockUpdate) -> SkuStockInput:
-        merged = {
-            "cantidad": current.get("cantidad", 0),
-            "minimo": current.get("minimo", 0),
-            **update.model_dump(exclude_unset=True),
-        }
-        return cls._merged(SkuStockInput, "stock", merged)
 
     @classmethod
     async def validate_talla(cls, db_session: AsyncSession, talla_id: UUID) -> None:
@@ -434,64 +394,64 @@ class SkuService:
         db_session.expire_all()
         return await cls.get(db_session, sku_id, load_detail=True)
 
+    @staticmethod
+    def _stock_conflict(field_name: str, message: str, actual: int) -> AppException:
+        """409 con el stock actual, para que el frontend lo muestre sin otra consulta."""
+        return AppException(
+            message,
+            409,
+            ErrorCode.CONFLICT,
+            {field_name: message, "stock_actual": actual},
+        )
+
     @classmethod
-    async def update(
+    async def update_stock(
         cls,
         db_session: AsyncSession,
         sku_id: UUID,
-        data: SkuUpdate,
+        data: SkuStockUpdate,
         actor_id: UUID,
     ) -> Sku:
         """
-        Actualiza un SKU. Dentro de precio y stock solo cambia lo enviado; el
-        resultado se valida con las mismas reglas que al crear. Al enviar stock
-        se renueva su fecha de actualización. codigo_barras acepta null.
-        """
-        changes = data.model_dump(exclude_unset=True, exclude={"precio", "stock"})
-        sku = await cls.get(
-            db_session,
-            sku_id,
-            for_update=bool(changes) or data.precio is not None or data.stock is not None,
-        )
-        repository = SkuRepository(db_session)
+        Cambia el stock de un SKU existente con el SKU bloqueado, igual que las
+        ventas, para que ningún cambio pise a otro (ver SkuStockUpdate). Las
+        ventas pendientes no reservan stock: solo cuenta lo ya confirmado.
 
-        if changes.get("talla_id", sku.talla_id) != sku.talla_id:
-            await cls.validate_talla(db_session, changes["talla_id"])
-            await cls._validate_unique_talla(
-                repository,
-                sku.producto_color_id,
-                changes["talla_id"],
-                exclude_id=sku.id,
+        Si nada cambia no se guarda, y stock.actualizado conserva la fecha del
+        último cambio real. Devuelve el SKU con su Detail cargado.
+        """
+        sku = await cls.get(db_session, sku_id, for_update=True)
+        actual = int(sku.stock.get("cantidad", 0))
+        minimo_actual = int(sku.stock.get("minimo", 0))
+
+        cantidad = actual if data.ajuste is None else actual + data.ajuste
+        if cantidad < 0:
+            raise cls._stock_conflict(
+                "ajuste",
+                f"El stock quedaría en {cantidad}: hay {actual} y el ajuste es {data.ajuste}.",
+                actual,
+            )
+        minimo = minimo_actual if data.minimo is None else data.minimo
+
+        if (cantidad, minimo) != (actual, minimo_actual):
+            now = utc_now()
+            sku.stock = {"cantidad": cantidad, "minimo": minimo, "actualizado": now.isoformat()}
+            sku.updated_at = now
+            sku.updated_by = actor_id
+            await cls._commit(db_session, sku)
+            logger.info(
+                "Stock actualizado: sku_id=%s cantidad=%s->%s minimo=%s->%s actor_id=%s",
+                sku_id,
+                actual,
+                cantidad,
+                minimo_actual,
+                minimo,
+                actor_id,
             )
 
-        codigo_barras = changes.get("codigo_barras")
-        if codigo_barras is not None and codigo_barras != sku.codigo_barras:
-            await cls.validate_unique_codigo_barras(repository, codigo_barras, exclude_id=sku.id)
-
-        # Precio y stock solo se guardan si cambian: así stock.actualizado
-        # conserva la fecha del último cambio real.
-        if data.precio is not None:
-            precio = cls.precio_json(cls._merge_precio(sku.precio, data.precio))
-            if precio != sku.precio:
-                changes["precio"] = precio
-        if data.stock is not None:
-            stock = cls._merge_stock(sku.stock, data.stock)
-            if stock.model_dump() != {key: sku.stock.get(key, 0) for key in ("cantidad", "minimo")}:
-                changes["stock"] = cls.stock_json(stock)
-        if not changes:
-            return await cls.get(db_session, sku_id, load_detail=True)
-
-        for field_name, value in changes.items():
-            setattr(sku, field_name, value)
-        sku.updated_at = utc_now()
-        sku.updated_by = actor_id
-        await cls._commit(db_session, sku)
-
-        logger.info("SKU actualizado: sku_id=%s actor_id=%s", sku.id, actor_id)
         # Responde lo mismo que GET /{id}: se recarga con su Detail.
         db_session.expire_all()
         return await cls.get(db_session, sku_id, load_detail=True)
-
 
     @classmethod
     async def delete(

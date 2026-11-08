@@ -268,7 +268,7 @@ async def test_create_descuento_unitario_mayor_que_precio_responde_422() -> None
 
 
 @pytest.mark.asyncio
-async def test_replace_items_actualiza_elimina_crea_y_rehace_snapshot() -> None:
+async def test_replace_items_con_recalcular_actualiza_elimina_crea_y_rehace_snapshot() -> None:
     camisa = _sku_venta(normal=29.95)
     pantalon = _sku_venta(normal=49.90, nombre="Pantalón chino")
     falda = _sku_venta(normal=39.90, nombre="Falda")
@@ -284,6 +284,7 @@ async def test_replace_items_actualiza_elimina_crea_y_rehace_snapshot() -> None:
                 {"sku_id": str(camisa.sku.id), "cantidad": 2},
                 {"sku_id": str(falda.sku.id), "cantidad": 1},
             ],
+            "recalcular_precios": True,
         }
     )
 
@@ -305,6 +306,97 @@ async def test_replace_items_actualiza_elimina_crea_y_rehace_snapshot() -> None:
     assert venta.total == Decimal("89.90")
     assert venta.nota == "Cambió el pantalón por una falda."
     assert venta.updated_by == actor.id
+
+
+@pytest.mark.asyncio
+async def test_replace_items_por_defecto_conserva_el_precio_ofrecido() -> None:
+    camisa = _sku_venta(normal=80)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 2))  # se ofreció a 80
+    [item_camisa] = venta.items
+    # Después la camisa sube a 100 y cambia de nombre; se añaden unas medias.
+    camisa.sku.precio = {"normal": 100, "rebajado": None, "rebaja_hasta": None}
+    camisa = SkuParaVenta(camisa.sku, "Camisa Oxford slim", "Azul marino", "M")
+    medias = _sku_venta(normal=20, nombre="Medias")
+    actor = _actor()
+    data = VentaItemsUpdate.model_validate(
+        {
+            "items": [
+                {"sku_id": str(camisa.sku.id), "cantidad": 1, "descuento_unitario": 5},
+                {"sku_id": str(medias.sku.id), "cantidad": 1},
+            ]
+        }
+    )
+
+    with _repos(skus={s.sku.id: s for s in (camisa, medias)}, venta=venta) as repos:
+        await VentaService.replace_items(_session(), venta.id, data, actor, get_settings())
+
+    assert (item_camisa.precio_normal, item_camisa.precio_unitario) == (Decimal("80"), Decimal("80"))
+    assert item_camisa.producto_nombre == "Camisa Oxford"
+    assert (item_camisa.cantidad, item_camisa.descuento_unitario) == (1, Decimal("5"))
+    assert item_camisa.subtotal == Decimal("75")
+    assert item_camisa.updated_by == actor.id
+    [nuevo] = _added_items(repos)
+    assert nuevo.precio_unitario == Decimal("20")  # el ítem nuevo entra con el precio del día
+    assert (venta.subtotal, venta.total) == (Decimal("95"), Decimal("95"))
+
+
+@pytest.mark.asyncio
+async def test_replace_items_por_defecto_no_bloquea_si_el_precio_bajo() -> None:
+    camisa = _sku_venta(normal=100)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1))
+    venta.items[0].descuento_unitario = Decimal("70")
+    venta.items[0].subtotal = Decimal("30")
+    # El precio bajó a 50: recalcular daría 422, pero solo se corrige la nota.
+    camisa.sku.precio = {"normal": 50, "rebajado": None, "rebaja_hasta": None}
+    data = VentaItemsUpdate.model_validate(
+        {
+            "nota": "Recoge el lunes.",
+            "items": [{"sku_id": str(camisa.sku.id), "cantidad": 1, "descuento_unitario": 70}],
+        }
+    )
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta):
+        await VentaService.replace_items(_session(), venta.id, data, _actor(), get_settings())
+
+    [item] = venta.items
+    assert (item.precio_unitario, item.subtotal) == (Decimal("100"), Decimal("30"))
+    assert item.updated_by is None  # nada del ítem cambió
+    assert venta.total == Decimal("30")
+    assert venta.nota == "Recoge el lunes."
+
+
+@pytest.mark.asyncio
+async def test_replace_items_por_defecto_valida_el_descuento_contra_el_precio_ofrecido() -> None:
+    camisa = _sku_venta(normal=80)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1))
+    camisa.sku.precio = {"normal": 100, "rebajado": None, "rebaja_hasta": None}
+    data = VentaItemsUpdate.model_validate(
+        {"items": [{"sku_id": str(camisa.sku.id), "cantidad": 1, "descuento_unitario": 90}]}
+    )
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta), pytest.raises(AppException) as error:
+        await VentaService.replace_items(_session(), venta.id, data, _actor(), get_settings())
+
+    assert error.value.status_code == 422
+    assert "items" in error.value.details
+
+
+@pytest.mark.asyncio
+async def test_replace_items_con_recalcular_rechaza_descuento_mayor_al_precio_del_dia() -> None:
+    camisa = _sku_venta(normal=100)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1))
+    camisa.sku.precio = {"normal": 50, "rebajado": None, "rebaja_hasta": None}
+    data = VentaItemsUpdate.model_validate(
+        {
+            "items": [{"sku_id": str(camisa.sku.id), "cantidad": 1, "descuento_unitario": 70}],
+            "recalcular_precios": True,
+        }
+    )
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta), pytest.raises(AppException) as error:
+        await VentaService.replace_items(_session(), venta.id, data, _actor(), get_settings())
+
+    assert error.value.status_code == 422
 
 
 @pytest.mark.parametrize("estado", [EstadoVenta.CONFIRMADA, EstadoVenta.CANCELADA])
@@ -343,7 +435,7 @@ async def test_confirmar_descuenta_stock_y_fija_confirmada_at() -> None:
 
     with _repos(skus={camisa.sku.id: camisa}, venta=venta) as repos:
         await VentaService.change_estado(
-            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CONFIRMADA), actor
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CONFIRMADA), actor, get_settings()
         )
 
     assert venta.estado == EstadoVenta.CONFIRMADA
@@ -361,7 +453,7 @@ async def test_confirmar_sin_stock_responde_409() -> None:
 
     with _repos(skus={camisa.sku.id: camisa}, venta=venta), pytest.raises(AppException) as error:
         await VentaService.change_estado(
-            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CONFIRMADA), _actor()
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CONFIRMADA), _actor(), get_settings()
         )
 
     assert error.value.status_code == 409
@@ -376,7 +468,7 @@ async def test_confirmar_con_sku_eliminado_responde_409() -> None:
 
     with _repos(skus={}, venta=venta), pytest.raises(AppException) as error:
         await VentaService.change_estado(
-            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CONFIRMADA), _actor()
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CONFIRMADA), _actor(), get_settings()
         )
 
     assert error.value.status_code == 409
@@ -390,7 +482,7 @@ async def test_cajero_cancela_pendiente_sin_tocar_stock() -> None:
 
     with _repos(skus={camisa.sku.id: camisa}, venta=venta) as repos:
         await VentaService.change_estado(
-            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CANCELADA), _actor(Role.CAJERO)
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CANCELADA), _actor(Role.CAJERO), get_settings()
         )
 
     assert venta.estado == EstadoVenta.CANCELADA
@@ -406,7 +498,7 @@ async def test_cajero_no_puede_anular_confirmada() -> None:
 
     with _repos(skus={camisa.sku.id: camisa}, venta=venta), pytest.raises(AppException) as error:
         await VentaService.change_estado(
-            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CANCELADA), _actor(Role.CAJERO)
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CANCELADA), _actor(Role.CAJERO), get_settings()
         )
 
     assert error.value.status_code == 403
@@ -421,7 +513,7 @@ async def test_admin_anula_confirmada_y_devuelve_stock() -> None:
 
     with _repos(skus={camisa.sku.id: camisa}, venta=venta):
         await VentaService.change_estado(
-            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CANCELADA), _actor(Role.ADMIN)
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CANCELADA), _actor(Role.ADMIN), get_settings()
         )
 
     assert venta.estado == EstadoVenta.CANCELADA
@@ -444,7 +536,129 @@ async def test_transiciones_invalidas_responden_409(actual: EstadoVenta, destino
 
     with _repos(skus={camisa.sku.id: camisa}, venta=venta), pytest.raises(AppException) as error:
         await VentaService.change_estado(
-            _session(), venta.id, VentaEstadoUpdate(estado=destino), _actor(Role.ADMIN)
+            _session(), venta.id, VentaEstadoUpdate(estado=destino), _actor(Role.ADMIN), get_settings()
         )
 
     assert error.value.status_code == 409
+
+
+# ------------------------------------------------- confirmar: proforma o precios del día
+
+
+async def _confirmar(
+    venta: Venta,
+    *skus: SkuParaVenta,
+    actor: CurrentUser | None = None,
+    recalcular: bool = True,
+) -> None:
+    with _repos(skus={s.sku.id: s for s in skus}, venta=venta):
+        await VentaService.change_estado(
+            _session(),
+            venta.id,
+            VentaEstadoUpdate(estado=EstadoVenta.CONFIRMADA, recalcular_precios=recalcular),
+            actor or _actor(),
+            get_settings(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_confirmar_cobra_el_precio_y_los_nombres_del_dia() -> None:
+    camisa = _sku_venta(normal=100)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 2))  # se pidió a 100
+    venta.descuento = Decimal("10")
+    venta.total = venta.subtotal - venta.descuento
+    # Antes de confirmar entra una rebaja y se corrige el nombre del producto.
+    camisa.sku.precio = {"normal": 100, "rebajado": 80, "rebaja_hasta": None}
+    camisa = SkuParaVenta(camisa.sku, "Camisa Oxford slim", "Azul marino", "M")
+    actor = _actor()
+
+    await _confirmar(venta, camisa, actor=actor)
+
+    [item] = venta.items
+    assert (item.precio_normal, item.precio_unitario) == (Decimal("100"), Decimal("80"))
+    assert item.subtotal == Decimal("160")
+    assert item.producto_nombre == "Camisa Oxford slim"
+    assert item.updated_by == actor.id
+    assert (venta.subtotal, venta.descuento, venta.total) == (Decimal("160"), Decimal("10"), Decimal("150"))
+    assert venta.estado == EstadoVenta.CONFIRMADA
+    assert camisa.sku.stock["cantidad"] == 8
+
+
+@pytest.mark.asyncio
+async def test_confirmar_sin_cambios_en_el_catalogo_no_toca_los_items() -> None:
+    camisa = _sku_venta()
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1))
+
+    await _confirmar(venta, camisa)
+
+    assert venta.items[0].updated_by is None
+    assert venta.estado == EstadoVenta.CONFIRMADA
+
+
+@pytest.mark.asyncio
+async def test_confirmar_rechaza_descuento_mayor_al_precio_del_dia_sin_tocar_stock() -> None:
+    camisa = _sku_venta(normal=100, cantidad=5)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1))
+    venta.items[0].descuento_unitario = Decimal("90")
+    camisa.sku.precio = {"normal": 50, "rebajado": None, "rebaja_hasta": None}  # bajó el precio
+
+    with pytest.raises(AppException) as error:
+        await _confirmar(venta, camisa)
+
+    assert error.value.status_code == 422
+    assert "items" in error.value.details
+    assert venta.estado == EstadoVenta.PENDIENTE
+    assert camisa.sku.stock["cantidad"] == 5
+
+
+@pytest.mark.asyncio
+async def test_confirmar_rechaza_descuento_de_venta_mayor_al_nuevo_subtotal() -> None:
+    camisa = _sku_venta(normal=100, cantidad=5)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1))
+    venta.descuento = Decimal("90")
+    camisa.sku.precio = {"normal": 50, "rebajado": None, "rebaja_hasta": None}
+
+    with pytest.raises(AppException) as error:
+        await _confirmar(venta, camisa)
+
+    assert error.value.status_code == 422
+    assert "descuento" in error.value.details
+    assert camisa.sku.stock["cantidad"] == 5
+
+
+@pytest.mark.asyncio
+async def test_cancelar_no_recalcula_precios() -> None:
+    camisa = _sku_venta(normal=100)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1))
+    camisa.sku.precio = {"normal": 70, "rebajado": None, "rebaja_hasta": None}
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta):
+        await VentaService.change_estado(
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CANCELADA), _actor(), get_settings()
+        )
+
+    assert venta.items[0].precio_unitario == Decimal("100")
+    assert venta.total == Decimal("100")
+
+
+@pytest.mark.asyncio
+async def test_confirmar_por_defecto_cobra_la_proforma_tal_como_se_ofrecio() -> None:
+    camisa = _sku_venta(normal=100, cantidad=5)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1))
+    venta.items[0].descuento_unitario = Decimal("70")
+    venta.items[0].subtotal = Decimal("30")
+    venta.subtotal = venta.total = Decimal("30")
+    # El precio bajó a 50: recalcular daría 422, pero la proforma se cobra como se ofreció.
+    camisa.sku.precio = {"normal": 50, "rebajado": None, "rebaja_hasta": None}
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta):
+        await VentaService.change_estado(
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CONFIRMADA), _actor(), get_settings()
+        )
+
+    [item] = venta.items
+    assert (item.precio_unitario, item.subtotal) == (Decimal("100"), Decimal("30"))
+    assert item.updated_by is None
+    assert venta.total == Decimal("30")
+    assert venta.estado == EstadoVenta.CONFIRMADA
+    assert camisa.sku.stock["cantidad"] == 4
