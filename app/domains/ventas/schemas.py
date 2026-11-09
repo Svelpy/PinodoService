@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_valid
 
 from app.domains.venta_items.schemas import VentaItemCreate, VentaItemResponse
 from app.shared.enums import CanalVenta, EstadoVenta, MetodoPago
+from app.shared.schemas.pagination import PaginatedResponse
 from app.shared.services.validators import (
     validator_boolean,
     validator_non_empty_text,
@@ -314,6 +315,50 @@ class VentaResponse(BaseModel):
             }
         },
     )
+
+
+class VentaResumenConfirmada(BaseModel):
+    """Ventas confirmadas por método de pago; total es la suma de los tres."""
+
+    efectivo: Decimal
+    qr: Decimal
+    transferencia: Decimal
+    total: Decimal
+
+    @field_serializer("efectivo", "qr", "transferencia", "total", when_used="json")
+    def serialize_money(self, value: Decimal) -> float:
+        return float(value)
+
+
+class VentaResumen(BaseModel):
+    """
+    Suma de total de todas las ventas filtradas, no solo de la página. Ignora
+    los filtros estado y metodo_pago para mostrar siempre el desglose completo.
+    """
+
+    confirmada: VentaResumenConfirmada
+    pendiente: Decimal
+    cancelada: Decimal
+
+    @field_serializer("pendiente", "cancelada", when_used="json")
+    def serialize_money(self, value: Decimal) -> float:
+        return float(value)
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "confirmada": {"efectivo": 800, "qr": 340, "transferencia": 0, "total": 1140},
+                "pendiente": 160,
+                "cancelada": 90,
+            }
+        },
+    )
+
+
+class VentaPaginatedResponse(PaginatedResponse[VentaResponse]):
+    """Listado paginado de ventas con el resumen de importes de todo el resultado filtrado."""
+
+    resumen: VentaResumen
 
 
 class VentaResponseAudit(VentaResponse):

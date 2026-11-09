@@ -14,13 +14,12 @@ from app.domains.ventas.schemas import (
     VentaDetail,
     VentaEstadoUpdate,
     VentaItemsUpdate,
-    VentaResponse,
+    VentaPaginatedResponse,
     VentaResponseAudit,
 )
 from app.domains.ventas.services import VentaService
 from app.shared.enums import Action, CanalVenta, EstadoVenta, MetodoPago, Module
 from app.shared.schemas.errors import ErrorResponse
-from app.shared.schemas.pagination import PaginatedResponse
 
 
 router = APIRouter(prefix="/ventas", tags=["Ventas"])
@@ -69,11 +68,15 @@ async def create_venta(
 
 @router.get(
     "/",
-    response_model=PaginatedResponse[VentaResponse],
+    response_model=VentaPaginatedResponse,
     summary="Listar ventas",
     description=(
         "De la más reciente a la más antigua. desde y hasta son fechas de la "
-        "tienda, ambas incluidas." + SCOPE_DESCRIPTION
+        "tienda, ambas incluidas. resumen suma el total de todas las ventas "
+        "filtradas, no solo las de la página: las confirmadas por método de pago "
+        "(y su total), las pendientes y las canceladas. Ignora los filtros estado "
+        "y metodo_pago para mostrar siempre el desglose completo."
+        + SCOPE_DESCRIPTION
     ),
     responses=_error_responses(401, 403, 422, 500),
 )
@@ -93,7 +96,7 @@ async def list_ventas(
     numero: Annotated[int | None, Query(ge=1)] = None,
     desde: Annotated[date | None, Query()] = None,
     hasta: Annotated[date | None, Query()] = None,
-) -> PaginatedResponse[VentaResponse]:
+) -> VentaPaginatedResponse:
     return await VentaService.list(
         db_session,
         current_user,

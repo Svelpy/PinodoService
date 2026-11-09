@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import ColumnElement, false, func, select, true
@@ -59,6 +60,35 @@ class VentaRepository:
         result = await self.db_session.execute(statement)
         return result.scalar_one_or_none()
 
+    @staticmethod
+    def _list_filters(
+        *,
+        scope: VentaScope,
+        estado: EstadoVenta | None = None,
+        canal: CanalVenta | None = None,
+        metodo_pago: MetodoPago | None = None,
+        created_by: UUID | None = None,
+        numero: int | None = None,
+        desde: datetime | None = None,
+        hasta: datetime | None = None,
+    ) -> list[ColumnElement[bool]]:
+        filters = [Venta.is_deleted.is_(False), scope.condition()]
+        if estado is not None:
+            filters.append(Venta.estado == estado)
+        if canal is not None:
+            filters.append(Venta.canal == canal)
+        if metodo_pago is not None:
+            filters.append(Venta.metodo_pago == metodo_pago)
+        if created_by is not None:
+            filters.append(Venta.created_by == created_by)
+        if numero is not None:
+            filters.append(Venta.numero == numero)
+        if desde is not None:
+            filters.append(Venta.created_at >= desde)
+        if hasta is not None:
+            filters.append(Venta.created_at < hasta)
+        return filters
+
     async def find_many(
         self,
         *,
@@ -77,21 +107,16 @@ class VentaRepository:
         Listado paginado, de la venta más reciente a la más antigua. desde es
         inclusivo y hasta exclusivo, ambos sobre created_at.
         """
-        filters = [Venta.is_deleted.is_(False), scope.condition()]
-        if estado is not None:
-            filters.append(Venta.estado == estado)
-        if canal is not None:
-            filters.append(Venta.canal == canal)
-        if metodo_pago is not None:
-            filters.append(Venta.metodo_pago == metodo_pago)
-        if created_by is not None:
-            filters.append(Venta.created_by == created_by)
-        if numero is not None:
-            filters.append(Venta.numero == numero)
-        if desde is not None:
-            filters.append(Venta.created_at >= desde)
-        if hasta is not None:
-            filters.append(Venta.created_at < hasta)
+        filters = self._list_filters(
+            scope=scope,
+            estado=estado,
+            canal=canal,
+            metodo_pago=metodo_pago,
+            created_by=created_by,
+            numero=numero,
+            desde=desde,
+            hasta=hasta,
+        )
 
         total_result = await self.db_session.execute(
             select(func.count()).select_from(Venta).where(*filters)
@@ -106,6 +131,39 @@ class VentaRepository:
             .limit(limit)
         )
         return list(result.scalars().all()), total
+
+    async def sum_total_by_estado_and_metodo_pago(
+        self,
+        *,
+        scope: VentaScope,
+        canal: CanalVenta | None = None,
+        created_by: UUID | None = None,
+        numero: int | None = None,
+        desde: datetime | None = None,
+        hasta: datetime | None = None,
+    ) -> dict[tuple[EstadoVenta, MetodoPago], Decimal]:
+        """
+        Suma de total de TODAS las ventas filtradas (sin offset ni limit),
+        agrupada por estado y método de pago. Las combinaciones sin ventas no
+        aparecen.
+        """
+        filters = self._list_filters(
+            scope=scope,
+            canal=canal,
+            created_by=created_by,
+            numero=numero,
+            desde=desde,
+            hasta=hasta,
+        )
+        result = await self.db_session.execute(
+            select(Venta.estado, Venta.metodo_pago, func.sum(Venta.total))
+            .where(*filters)
+            .group_by(Venta.estado, Venta.metodo_pago)
+        )
+        return {
+            (EstadoVenta(estado), MetodoPago(metodo_pago)): Decimal(suma)
+            for estado, metodo_pago, suma in result.all()
+        }
 
     def add(self, venta: Venta) -> None:
         self.db_session.add(venta)

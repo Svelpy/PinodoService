@@ -68,8 +68,23 @@ def test_cajero_vende_pero_no_anula_ventas_confirmadas() -> None:
     assert ROLE_PERMISSIONS[Role.CAJERO][Module.VENTA] == frozenset(
         {Action.CREATE, Action.READ, Action.UPDATE}
     )
-    for role in (Role.SUPERADMIN, Role.OWNER, Role.ADMIN):
+    for role in (Role.SUPERADMIN, Role.OWNER):
         assert Action.DELETE in ROLE_PERMISSIONS[role][Module.VENTA], role
+
+
+def test_superadmin_tiene_todas_las_acciones_en_todos_los_modulos() -> None:
+    for module, actions in ROLE_PERMISSIONS[Role.SUPERADMIN].items():
+        assert actions == frozenset(Action), module
+
+
+def test_owner_no_audita() -> None:
+    for module, actions in ROLE_PERMISSIONS[Role.OWNER].items():
+        assert Action.AUDIT not in actions, module
+
+
+def test_admin_no_elimina() -> None:
+    for module, actions in ROLE_PERMISSIONS[Role.ADMIN].items():
+        assert Action.DELETE not in actions, module
 
 
 def test_todo_rol_con_acceso_a_ventas_tiene_alcance() -> None:

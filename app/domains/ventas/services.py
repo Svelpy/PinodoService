@@ -22,12 +22,13 @@ from app.domains.ventas.schemas import (
     VentaCreate,
     VentaEstadoUpdate,
     VentaItemsUpdate,
-    VentaResponse,
+    VentaPaginatedResponse,
+    VentaResumen,
+    VentaResumenConfirmada,
 )
 from app.shared.enums import Action, CanalVenta, EstadoVenta, MetodoPago, Module
 from app.shared.errors.codes import ErrorCode
 from app.shared.errors.exceptions import AppException
-from app.shared.schemas.pagination import PaginatedResponse
 from app.shared.services.permissions import (
     VENTA_GLOBAL_SCOPE_ROLES,
     VENTA_OWN_SCOPE_ROLES,
@@ -130,8 +131,11 @@ class VentaService:
         numero: int | None = None,
         desde: date | None = None,
         hasta: date | None = None,
-    ) -> PaginatedResponse[VentaResponse]:
-        """desde y hasta son fechas de la tienda, ambas incluidas."""
+    ) -> VentaPaginatedResponse:
+        """
+        desde y hasta son fechas de la tienda, ambas incluidas. resumen suma
+        todas las ventas filtradas, no solo las de la página.
+        """
         if page < 1:
             raise cls._validation_error("page", "La página debe ser mayor o igual a 1.")
         if per_page < 1 or per_page > 100:
@@ -139,24 +143,61 @@ class VentaService:
         if desde is not None and hasta is not None and desde > hasta:
             raise cls._validation_error("desde", "La fecha desde no puede ser posterior a hasta.")
 
-        ventas, total = await VentaRepository(db_session).find_many(
+        desde_at = cls._local_start(desde, settings) if desde is not None else None
+        hasta_at = cls._local_start(hasta + timedelta(days=1), settings) if hasta is not None else None
+        repository = VentaRepository(db_session)
+        scope = cls._scope_for(actor)
+        ventas, total = await repository.find_many(
             offset=(page - 1) * per_page,
             limit=per_page,
-            scope=cls._scope_for(actor),
+            scope=scope,
             estado=estado,
             canal=canal,
             metodo_pago=metodo_pago,
             created_by=created_by,
             numero=numero,
-            desde=cls._local_start(desde, settings) if desde is not None else None,
-            hasta=cls._local_start(hasta + timedelta(days=1), settings) if hasta is not None else None,
+            desde=desde_at,
+            hasta=hasta_at,
         )
-        return PaginatedResponse[VentaResponse](
+        # El resumen cubre todo el rango filtrado, no solo la página actual.
+        sumas = await repository.sum_total_by_estado_and_metodo_pago(
+            scope=scope,
+            canal=canal,
+            created_by=created_by,
+            numero=numero,
+            desde=desde_at,
+            hasta=hasta_at,
+        )
+        return VentaPaginatedResponse(
             total=total,
             page=page,
             per_page=per_page,
             total_pages=(total + per_page - 1) // per_page,
             data=ventas,
+            resumen=cls._resumen(sumas),
+        )
+
+    @staticmethod
+    def _resumen(sumas: dict[tuple[EstadoVenta, MetodoPago], Decimal]) -> VentaResumen:
+        def suma(estado: EstadoVenta, metodo_pago: MetodoPago | None = None) -> Decimal:
+            return sum(
+                (
+                    valor
+                    for (estado_venta, metodo), valor in sumas.items()
+                    if estado_venta == estado and (metodo_pago is None or metodo == metodo_pago)
+                ),
+                Decimal("0"),
+            )
+
+        return VentaResumen(
+            confirmada=VentaResumenConfirmada(
+                efectivo=suma(EstadoVenta.CONFIRMADA, MetodoPago.EFECTIVO),
+                qr=suma(EstadoVenta.CONFIRMADA, MetodoPago.QR),
+                transferencia=suma(EstadoVenta.CONFIRMADA, MetodoPago.TRANSFERENCIA),
+                total=suma(EstadoVenta.CONFIRMADA),
+            ),
+            pendiente=suma(EstadoVenta.PENDIENTE),
+            cancelada=suma(EstadoVenta.CANCELADA),
         )
 
     # ------------------------------------------------------------------ ítems

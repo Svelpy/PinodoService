@@ -27,33 +27,33 @@ ROLE_PERMISSIONS: dict[Role, dict[Module, frozenset[Action]]] = {
         Module.SKU: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),  # DELETE = anular una venta confirmada
     },
-    # Dueño de la tienda.
+    # Dueño de la tienda. La auditoría (AUDIT) queda para SUPERADMIN.
     Role.OWNER: {
-        Module.USUARIO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.CONFIG: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.SECCION: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.CATEGORIA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.PRODUCTO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.COLOR: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.PRODUCTO_COLOR: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.IMAGEN: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.TALLA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.SKU: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),  # DELETE = anular una venta confirmada
+        Module.USUARIO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}),
+        Module.CONFIG: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}),
+        Module.SECCION: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}),
+        Module.CATEGORIA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}),
+        Module.PRODUCTO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}),
+        Module.COLOR: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}),
+        Module.PRODUCTO_COLOR: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}),
+        Module.IMAGEN: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}),
+        Module.TALLA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}),
+        Module.SKU: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}),
+        Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}),  # DELETE = anular una venta confirmada
     },
-    # Encargado que administra la tienda por el dueño.
+    # Encargado que administra la tienda por el dueño. No elimina (DELETE) en ningún módulo.
     Role.ADMIN: {
-        Module.USUARIO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),  # la jerarquía lo limita a gestionar cajeros
-        Module.CONFIG: frozenset({Action.READ}),  # la identidad de la tienda la decide el dueño
-        Module.SECCION: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.AUDIT}),  # estructura de la tienda: oculta con is_visible
-        Module.CATEGORIA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.PRODUCTO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.COLOR: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.PRODUCTO_COLOR: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.IMAGEN: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.TALLA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.SKU: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
-        Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),  # DELETE = anular una venta confirmada
+        Module.USUARIO: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),  # la jerarquía lo limita a gestionar cajeros
+        Module.CONFIG: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),  
+        Module.SECCION: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),  # estructura de la tienda: oculta con is_visible
+        Module.CATEGORIA: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),
+        Module.PRODUCTO: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),
+        Module.COLOR: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),
+        Module.PRODUCTO_COLOR: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),
+        Module.IMAGEN: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),
+        Module.TALLA: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),
+        Module.SKU: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),
+        Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),  # sin DELETE: no anula ventas confirmadas
     },
     # Atiende la caja: registra ventas y consulta el catálogo, precios y stock sin modificarlos.
     Role.CAJERO: {
