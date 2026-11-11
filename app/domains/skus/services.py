@@ -1,5 +1,5 @@
 import secrets
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -10,11 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.base_model import utc_now
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
+from app.domains.movimientos_inventario.services import MovimientoInventarioService
 from app.domains.producto_colores.repositories import ProductoColorRepository
 from app.domains.skus.models import Sku
 from app.domains.skus.repositories import SkuRepository
 from app.domains.skus.schemas import (
     SkuCreate,
+    SkuDetailCreate,
     SkuDetail,
     SkuInventarioItem,
     SkuListItem,
@@ -24,6 +26,7 @@ from app.domains.skus.schemas import (
     SkuStockUpdate,
 )
 from app.domains.tallas.repositories import TallaRepository
+from app.shared.enums import TipoMovimiento
 from app.shared.errors.codes import ErrorCode
 from app.shared.errors.exceptions import AppException
 from app.shared.schemas.pagination import PaginatedResponse
@@ -105,6 +108,45 @@ class SkuService:
     def stock_json(stock: SkuStockInput) -> dict[str, Any]:
         """El stock se guarda con la fecha de su última modificación."""
         return {**stock.model_dump(), "actualizado": utc_now().isoformat()}
+
+    @classmethod
+    def nuevo(
+        cls,
+        db_session: AsyncSession,
+        producto_color_id: UUID,
+        data: SkuDetailCreate,
+        actor_id: UUID,
+        now: datetime,
+    ) -> Sku:
+        """
+        Añade a la sesión un SKU nuevo ya validado. Su stock inicial entra al
+        kardex como un INGRESO a data.costo, así que el SKU nace con stock 0 y
+        el movimiento lo sube. No hace commit.
+        """
+        stock = data.stock or SkuStockInput()
+        sku = Sku(
+            producto_color_id=producto_color_id,
+            **data.model_dump(include={"talla_id", "codigo_barras", "is_visible", "costo"}),
+            precio=cls.precio_json(data.precio),
+            stock=cls.stock_json(SkuStockInput(cantidad=0, minimo=stock.minimo)),
+            created_at=now,
+            created_by=actor_id,
+            updated_at=now,
+            updated_by=actor_id,
+        )
+        SkuRepository(db_session).add(sku)
+        if stock.cantidad > 0:
+            MovimientoInventarioService.registrar(
+                db_session,
+                sku,
+                TipoMovimiento.INGRESO,
+                stock.cantidad,
+                actor_id,
+                now,
+                costo_unitario=data.costo,
+                motivo="Stock inicial",
+            )
+        return sku
 
     @classmethod
     def _validate_rebaja_no_vencida(cls, precio: SkuPrecio) -> None:
@@ -377,14 +419,7 @@ class SkuService:
         if data.codigo_barras is not None:
             await cls.validate_unique_codigo_barras(repository, data.codigo_barras)
 
-        sku = Sku(
-            **data.model_dump(exclude={"precio", "stock"}),
-            precio=cls.precio_json(data.precio),
-            stock=cls.stock_json(data.stock),
-            created_by=actor_id,
-            updated_by=actor_id,
-        )
-        repository.add(sku)
+        sku = cls.nuevo(db_session, data.producto_color_id, data, actor_id, utc_now())
         await cls._commit(db_session, sku)
 
         logger.info("SKU creado: sku_id=%s actor_id=%s", sku.id, actor_id)
@@ -393,16 +428,6 @@ class SkuService:
         sku_id = sku.id
         db_session.expire_all()
         return await cls.get(db_session, sku_id, load_detail=True)
-
-    @staticmethod
-    def _stock_conflict(field_name: str, message: str, actual: int) -> AppException:
-        """409 con el stock actual, para que el frontend lo muestre sin otra consulta."""
-        return AppException(
-            message,
-            409,
-            ErrorCode.CONFLICT,
-            {field_name: message, "stock_actual": actual},
-        )
 
     @classmethod
     async def update_stock(
@@ -413,39 +438,23 @@ class SkuService:
         actor_id: UUID,
     ) -> Sku:
         """
-        Cambia el stock de un SKU existente con el SKU bloqueado, igual que las
-        ventas, para que ningún cambio pise a otro (ver SkuStockUpdate). Las
-        ventas pendientes no reservan stock: solo cuenta lo ya confirmado.
-
-        Si nada cambia no se guarda, y stock.actualizado conserva la fecha del
-        último cambio real. Devuelve el SKU con su Detail cargado.
+        Cambia el stock mínimo. La cantidad solo cambia con movimientos del
+        kardex. Si nada cambia no se guarda. Devuelve el SKU con su Detail.
         """
         sku = await cls.get(db_session, sku_id, for_update=True)
-        actual = int(sku.stock.get("cantidad", 0))
         minimo_actual = int(sku.stock.get("minimo", 0))
 
-        cantidad = actual if data.ajuste is None else actual + data.ajuste
-        if cantidad < 0:
-            raise cls._stock_conflict(
-                "ajuste",
-                f"El stock quedaría en {cantidad}: hay {actual} y el ajuste es {data.ajuste}.",
-                actual,
-            )
-        minimo = minimo_actual if data.minimo is None else data.minimo
-
-        if (cantidad, minimo) != (actual, minimo_actual):
+        if data.minimo != minimo_actual:
             now = utc_now()
-            sku.stock = {"cantidad": cantidad, "minimo": minimo, "actualizado": now.isoformat()}
+            sku.stock = {**sku.stock, "minimo": data.minimo, "actualizado": now.isoformat()}
             sku.updated_at = now
             sku.updated_by = actor_id
             await cls._commit(db_session, sku)
             logger.info(
-                "Stock actualizado: sku_id=%s cantidad=%s->%s minimo=%s->%s actor_id=%s",
+                "Stock mínimo actualizado: sku_id=%s minimo=%s->%s actor_id=%s",
                 sku_id,
-                actual,
-                cantidad,
                 minimo_actual,
-                minimo,
+                data.minimo,
                 actor_id,
             )
 

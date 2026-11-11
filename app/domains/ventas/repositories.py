@@ -3,11 +3,12 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, false, func, select, true
+from sqlalchemy import ColumnElement, exists, false, func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domains.venta_items.models import VentaItem
+from app.domains.venta_pagos.models import VentaPago
 from app.domains.ventas.models import Venta
 from app.shared.enums import CanalVenta, EstadoVenta, MetodoPago
 
@@ -44,7 +45,7 @@ class VentaRepository:
         for_update: bool = False,
         load_detail: bool = False,
     ) -> Venta | None:
-        """Con load_detail carga los ítems activos que embebe el Detail."""
+        """Con load_detail carga los ítems y pagos activos que embebe el Detail."""
         statement = select(Venta).where(
             Venta.id == venta_id,
             Venta.is_deleted.is_(False),
@@ -54,7 +55,8 @@ class VentaRepository:
             statement = statement.with_for_update(of=Venta)
         if load_detail:
             statement = statement.options(
-                selectinload(Venta.items.and_(VentaItem.is_deleted.is_(False)))
+                selectinload(Venta.items.and_(VentaItem.is_deleted.is_(False))),
+                selectinload(Venta.pagos.and_(VentaPago.is_deleted.is_(False))),
             )
 
         result = await self.db_session.execute(statement)
@@ -78,7 +80,14 @@ class VentaRepository:
         if canal is not None:
             filters.append(Venta.canal == canal)
         if metodo_pago is not None:
-            filters.append(Venta.metodo_pago == metodo_pago)
+            # Ventas con al menos un pago por ese método (pueden tener pagos mixtos).
+            filters.append(
+                exists().where(
+                    VentaPago.venta_id == Venta.id,
+                    VentaPago.metodo == metodo_pago,
+                    VentaPago.is_deleted.is_(False),
+                )
+            )
         if created_by is not None:
             filters.append(Venta.created_by == created_by)
         if numero is not None:
@@ -132,7 +141,7 @@ class VentaRepository:
         )
         return list(result.scalars().all()), total
 
-    async def sum_total_by_estado_and_metodo_pago(
+    async def sum_totales_by_estado(
         self,
         *,
         scope: VentaScope,
@@ -141,11 +150,10 @@ class VentaRepository:
         numero: int | None = None,
         desde: datetime | None = None,
         hasta: datetime | None = None,
-    ) -> dict[tuple[EstadoVenta, MetodoPago], Decimal]:
+    ) -> dict[EstadoVenta, tuple[Decimal, Decimal]]:
         """
-        Suma de total de TODAS las ventas filtradas (sin offset ni limit),
-        agrupada por estado y método de pago. Las combinaciones sin ventas no
-        aparecen.
+        Suma de total y de total_pagado de TODAS las ventas filtradas (sin
+        offset ni limit), por estado. Los estados sin ventas no aparecen.
         """
         filters = self._list_filters(
             scope=scope,
@@ -156,14 +164,47 @@ class VentaRepository:
             hasta=hasta,
         )
         result = await self.db_session.execute(
-            select(Venta.estado, Venta.metodo_pago, func.sum(Venta.total))
+            select(Venta.estado, func.sum(Venta.total), func.sum(Venta.total_pagado))
             .where(*filters)
-            .group_by(Venta.estado, Venta.metodo_pago)
+            .group_by(Venta.estado)
         )
         return {
-            (EstadoVenta(estado), MetodoPago(metodo_pago)): Decimal(suma)
-            for estado, metodo_pago, suma in result.all()
+            EstadoVenta(estado): (Decimal(total), Decimal(total_pagado))
+            for estado, total, total_pagado in result.all()
         }
+
+    async def sum_pagos_by_metodo(
+        self,
+        *,
+        scope: VentaScope,
+        estado: EstadoVenta,
+        canal: CanalVenta | None = None,
+        created_by: UUID | None = None,
+        numero: int | None = None,
+        desde: datetime | None = None,
+        hasta: datetime | None = None,
+    ) -> dict[MetodoPago, Decimal]:
+        """
+        Suma de los pagos activos de las ventas filtradas en ese estado, por
+        método. Los filtros se aplican a la venta, no al pago. Los métodos sin
+        pagos no aparecen.
+        """
+        filters = self._list_filters(
+            scope=scope,
+            estado=estado,
+            canal=canal,
+            created_by=created_by,
+            numero=numero,
+            desde=desde,
+            hasta=hasta,
+        )
+        result = await self.db_session.execute(
+            select(VentaPago.metodo, func.sum(VentaPago.monto))
+            .join(Venta, VentaPago.venta_id == Venta.id)
+            .where(*filters, VentaPago.is_deleted.is_(False))
+            .group_by(VentaPago.metodo)
+        )
+        return {MetodoPago(metodo): Decimal(suma) for metodo, suma in result.all()}
 
     def add(self, venta: Venta) -> None:
         self.db_session.add(venta)

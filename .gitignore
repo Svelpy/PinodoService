@@ -75,3 +75,6 @@ ehthumbs.db
 
 
 docs/
+# Seeds: caché de Pixabay y galería de revisión
+seeds/data/pixabay_cache/
+seeds/data/galeria.html

@@ -1,7 +1,8 @@
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Index, select, text
+from sqlalchemy import CheckConstraint, Index, Numeric, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship
 
@@ -34,6 +35,7 @@ class Sku(BaseModel, table=True):
             unique=True,
             postgresql_where=text("is_deleted = false"),
         ),
+        CheckConstraint("costo >= 0", name="ck_skus_costo_no_negativo"),
         {"schema": "public"},
     )
 
@@ -43,6 +45,9 @@ class Sku(BaseModel, table=True):
     is_visible: bool = Field(default=True, nullable=False)
     precio: dict[str, Any] = Field(default_factory=default_precio,sa_type=JSONB,nullable=False)
     stock: dict[str, Any] = Field(default_factory=default_stock,sa_type=JSONB,nullable=False)
+    # Costo promedio ponderado por unidad. Lo recalcula cada INGRESO del kardex
+    # y se puede corregir a mano; solo lo ven los roles con acceso al kardex.
+    costo: Decimal = Field(default=Decimal("0"), sa_type=Numeric(12, 2), nullable=False)
 
     talla: Talla = Relationship(sa_relationship_kwargs={"lazy": "raise"})
 

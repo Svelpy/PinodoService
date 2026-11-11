@@ -131,7 +131,7 @@ def test_patch_rechaza_null(campo: str) -> None:
 
 
 def test_fila_existente_no_admite_stock_y_la_nueva_si() -> None:
-    with pytest.raises(ValidationError, match="PATCH /skus/{id}/stock"):
+    with pytest.raises(ValidationError, match="POST /movimientos-inventario/"):
         SkuDetailUpdate.model_validate(
             {"id": str(uuid4()), "talla_id": str(uuid4()), "precio": PRECIO, "stock": {"cantidad": 1}}
         )
@@ -141,6 +141,7 @@ def test_fila_existente_no_admite_stock_y_la_nueva_si() -> None:
     existente = SkuDetailUpdate.model_validate({"id": str(uuid4()), "talla_id": str(uuid4()), "precio": PRECIO})
     # Solo lo enviado cambia en un SKU existente.
     assert "codigo_barras" not in existente.model_fields_set
+    assert "costo" not in existente.model_fields_set
 
 
 def test_patch_rechaza_editar_y_eliminar_el_mismo_sku() -> None:

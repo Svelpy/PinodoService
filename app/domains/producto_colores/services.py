@@ -25,7 +25,7 @@ from app.domains.producto_colores.schemas import (
 from app.domains.productos.repositories import ProductoRepository
 from app.domains.skus.models import Sku
 from app.domains.skus.repositories import SkuRepository
-from app.domains.skus.schemas import SkuDetailUpdate, SkuStockInput
+from app.domains.skus.schemas import SkuDetailUpdate
 from app.domains.skus.services import SkuService
 from app.integrations.cloudinary import CloudinaryService
 from app.shared.errors.codes import ErrorCode
@@ -278,17 +278,9 @@ class ProductoColorService:
                 Imagen(producto_color_id=producto_color.id, **imagen.model_dump(), **audit)
             )
 
-        sku_repository = SkuRepository(db_session)
+        now = utc_now()
         for sku in data.skus:
-            sku_repository.add(
-                Sku(
-                    producto_color_id=producto_color.id,
-                    **sku.model_dump(exclude={"precio", "stock"}),
-                    precio=SkuService.precio_json(sku.precio),
-                    stock=SkuService.stock_json(sku.stock),
-                    **audit,
-                )
-            )
+            SkuService.nuevo(db_session, producto_color.id, sku, actor_id, now)
         return producto_color
 
     @classmethod
@@ -591,21 +583,12 @@ class ProductoColorService:
         por_id = {sku.id: sku for sku in actuales}
         for fila in data.skus or []:
             if fila.id is None:
-                repository.add(
-                    Sku(
-                        producto_color_id=producto_color_id,
-                        **fila.model_dump(exclude={"id", "precio", "stock"}),
-                        precio=SkuService.precio_json(fila.precio),
-                        stock=SkuService.stock_json(fila.stock or SkuStockInput()),
-                        created_by=actor_id,
-                        updated_by=actor_id,
-                    )
-                )
+                SkuService.nuevo(db_session, producto_color_id, fila, actor_id, now)
                 changed = True
                 continue
 
             sku = por_id[fila.id]
-            enviados = fila.model_fields_set & {"talla_id", "codigo_barras", "is_visible"}
+            enviados = fila.model_fields_set & {"talla_id", "codigo_barras", "is_visible", "costo"}
             cambios = {
                 field_name: value
                 for field_name, value in fila.model_dump(include=enviados).items()

@@ -20,6 +20,8 @@ class Module(str, Enum):
     TALLA = "TALLA"
     SKU = "SKU"
     VENTA = "VENTA"
+    VENTA_PAGO = "VENTA_PAGO"
+    MOVIMIENTO_INVENTARIO = "MOVIMIENTO_INVENTARIO"
 
 
 class Action(str, Enum):
@@ -49,6 +51,7 @@ class OrdenTienda(str, Enum):
 class CanalVenta(str, Enum):
     WHATSAPP = "WHATSAPP"
     TIENDA = "TIENDA"
+    TIKTOK = "TIKTOK"
 
 
 class EstadoVenta(str, Enum):
@@ -61,3 +64,10 @@ class MetodoPago(str, Enum):
     EFECTIVO = "EFECTIVO"
     QR = "QR"
     TRANSFERENCIA = "TRANSFERENCIA"
+
+
+class TipoMovimiento(str, Enum):
+    INGRESO = "INGRESO"
+    VENTA = "VENTA"
+    ANULACION = "ANULACION"
+    AJUSTE = "AJUSTE"

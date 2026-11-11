@@ -1229,7 +1229,66 @@ Antes de modificar código:
 
 ---
 
-## 22. Protección de la documentación
+## 22. Docker y despliegue
+
+El backend se despliega como una única imagen Docker, válida sin cambios para
+Dokploy (Traefik) y Railway. No crear Dockerfiles por entorno ni usar
+`docker-compose` en producción: PostgreSQL es externo al contenedor.
+
+Archivos:
+
+```text
+Dockerfile
+.dockerignore
+.env.example
+requirements.txt      → solo producción, versiones fijadas con ==
+requirements-dev.txt  → -r requirements.txt + herramientas de desarrollo
+```
+
+Dockerfile:
+
+- Base `python:<versión>-slim`; nunca `alpine` (rompe wheels como asyncpg).
+- Instalar `requirements.txt` antes de copiar el código.
+- Copiar carpetas explícitas (`app`, `migrations`, `seeds`, `alembic.ini`);
+  nunca `COPY . .`.
+- Ejecutar como usuario sin privilegios.
+- `CMD` con `sh -c` para expandir `${PORT:-8000}` y `exec` para que uvicorn
+  sea PID 1; con `--proxy-headers --forwarded-allow-ips='*'`, válido solo
+  detrás del proxy de la plataforma.
+- Sin `--reload` ni `--workers`: una réplica, un proceso.
+- `alembic upgrade head` se ejecuta en el `CMD` antes de uvicorn. Exige una
+  sola réplica; si se escala, la migración pasa a un paso pre-deploy.
+- `HEALTHCHECK` contra `/health` con `urllib`, sin instalar `curl`.
+- Los seeds se incluyen en la imagen pero nunca se ejecutan en el `CMD`.
+
+`/health` vive en `core/system_router.py`, fuera de `/api/v1`, sin
+autenticación. Comprueba PostgreSQL con `app.state.db_engine` y responde `200`
+o `503`.
+
+Los secretos nunca entran en la imagen: `.dockerignore` excluye `.env*`, y se
+configuran como variables de entorno en la plataforma.
+
+`.env.example` usa el formato de `--env-file`: `NOMBRE=valor` sin espacios ni
+comillas y sin comentarios al final de la línea. `Settings` trata una variable
+vacía como no definida.
+
+URLs de PostgreSQL:
+
+- `postgresql+asyncpg://USUARIO:PASSWORD@HOST:PUERTO/BASE`, con los caracteres
+  reservados del password codificados.
+- SSL con `?ssl=require`; nunca `?sslmode=require`.
+- En Supabase, Session Pooler (5432); nunca Transaction Pooler (6543).
+- El engine usa `pool_pre_ping=True`.
+
+La regla de selección de base de §10 debe ser idéntica en la app y en Alembic,
+porque el contenedor migra y sirve con la misma configuración.
+
+Dockerfile de referencia, `.dockerignore`, hosts según la red y checklist:
+`ARCHITECTURE.md`.
+
+---
+
+## 23. Protección de la documentación
 
 Los archivos Markdown no se modifican como efecto secundario de implementar
 un cambio funcional. En particular, `AGENTS.md` y `ARCHITECTURE.md` describen
@@ -1255,7 +1314,7 @@ alterar `AGENTS.md` ni `ARCHITECTURE.md`.
 
 ---
 
-## 23. Cuándo consultar `ARCHITECTURE.md`
+## 24. Cuándo consultar `ARCHITECTURE.md`
 
 No leer `ARCHITECTURE.md` antes de cada cambio.
 
@@ -1271,4 +1330,5 @@ Consultarlo cuando la tarea involucre:
 - integrations;
 - middlewares y exception handlers;
 - cambios en `main.py` o `api.py`;
+- Docker, despliegue o variables de entorno de la plataforma;
 - decisiones arquitectónicas no cubiertas claramente en este archivo.

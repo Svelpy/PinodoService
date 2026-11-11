@@ -46,11 +46,14 @@ def _error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
     status_code=status.HTTP_201_CREATED,
     summary="Registrar venta",
     description=(
-        "Crea la venta con sus ítems. Los precios y los datos del producto, color, "
-        "talla y código de barras se copian del SKU (snapshot), con la rebaja "
-        "vigente hoy. estado es PENDIENTE por defecto (pedido sin cobrar); "
-        "CONFIRMADA la cobra en la misma petición y descuenta el stock, por "
-        "ejemplo en una venta de mostrador. Responde 409 si no hay stock suficiente."
+        "Crea la venta con sus ítems y sus pagos. Los precios y los datos del "
+        "producto, color, talla y código de barras se copian del SKU (snapshot), "
+        "con la rebaja vigente hoy. estado es PENDIENTE por defecto (pedido sin "
+        "cobrar; sus pagos son anticipos); CONFIRMADA la cobra en la misma "
+        "petición y descuenta el stock, por ejemplo en una venta de mostrador: "
+        "sus pagos, que pueden ser mixtos, deben sumar el total. Responde 409 si "
+        "no hay stock suficiente, si los pagos superan el total o si una venta "
+        "confirmada no queda pagada completa."
     ),
     responses=_error_responses(401, 403, 409, 422, 500),
 )
@@ -72,10 +75,12 @@ async def create_venta(
     summary="Listar ventas",
     description=(
         "De la más reciente a la más antigua. desde y hasta son fechas de la "
-        "tienda, ambas incluidas. resumen suma el total de todas las ventas "
-        "filtradas, no solo las de la página: las confirmadas por método de pago "
-        "(y su total), las pendientes y las canceladas. Ignora los filtros estado "
-        "y metodo_pago para mostrar siempre el desglose completo."
+        "tienda, ambas incluidas. metodo_pago filtra las ventas con algún pago "
+        "por ese método. resumen suma todas las ventas filtradas, no solo las de "
+        "la página: lo cobrado en las confirmadas por método de pago (y su "
+        "total), el total de las pendientes y sus anticipos, y el de las "
+        "canceladas. Ignora los filtros estado y metodo_pago para mostrar siempre "
+        "el desglose completo."
         + SCOPE_DESCRIPTION
     ),
     responses=_error_responses(401, 403, 422, 500),
@@ -117,7 +122,7 @@ async def list_ventas(
     "/{venta_id}",
     response_model=VentaDetail,
     summary="Consultar venta",
-    description="Incluye sus ítems." + SCOPE_DESCRIPTION,
+    description="Incluye sus ítems y sus pagos." + SCOPE_DESCRIPTION,
     responses=_error_responses(401, 403, 404, 422, 500),
 )
 async def get_venta(
@@ -161,9 +166,10 @@ async def get_venta_audit(
         "cambian su cantidad y su descuento; los nuevos entran con el precio del "
         "día. Con recalcular_precios=true todos los ítems toman los precios y "
         "nombres del día (422 si un descuento ya no cabe). Los totales siempre se "
-        "recalculan. canal, metodo_pago, descuento, referencia, cliente_telefono y "
-        "nota solo cambian si se envían. Un SKU eliminado del catálogo responde "
-        "422 hasta quitarlo." + SCOPE_DESCRIPTION
+        "recalculan; 409 si el nuevo total queda por debajo de lo ya pagado. "
+        "canal, descuento, referencia, cliente_telefono y nota solo cambian si se "
+        "envían. Un SKU eliminado del catálogo responde 422 hasta quitarlo."
+        + SCOPE_DESCRIPTION
     ),
     responses=_error_responses(401, 403, 404, 409, 422, 500),
 )
@@ -190,8 +196,11 @@ async def replace_venta_items(
         "ofreció. Con recalcular_precios: true antes la actualiza con los precios "
         "y nombres del día (conserva cantidades y descuentos); 422 si un "
         "descuento ya no cabe en el precio nuevo. 409 si no alcanza el stock o "
-        "algún SKU fue eliminado. recalcular_precios solo se envía al confirmar. "
-        "CANCELADA anula la venta y fija cancelada_at; si estaba confirmada, "
+        "algún SKU fue eliminado. pagos cobra el saldo en la misma petición: "
+        "junto con los anticipos deben sumar exactamente el total (no hay fiado); "
+        "si no, 409. recalcular_precios y pagos solo se envían al confirmar. "
+        "CANCELADA anula la venta y fija cancelada_at; todos sus pagos se "
+        "devuelven y total_pagado queda como lo devuelto. Si estaba confirmada, "
         "devuelve el stock y exige permiso para anular ventas cobradas (un "
         "CAJERO solo cancela pendientes). Una venta cancelada no cambia más."
         + SCOPE_DESCRIPTION

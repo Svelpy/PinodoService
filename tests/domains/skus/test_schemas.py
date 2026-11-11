@@ -35,6 +35,13 @@ def test_sku_create_valores_por_defecto() -> None:
     assert data.stock.minimo == 0
     assert data.codigo_barras is None
     assert data.is_visible is True
+    assert data.costo == Decimal("0")
+
+
+@pytest.mark.parametrize("costo", [None, -1, "abc", True, "1.001"])
+def test_sku_create_rechaza_costo_invalido(costo: object) -> None:
+    with pytest.raises(ValidationError):
+        SkuCreate.model_validate(_create_data(costo=costo))
 
 
 def test_sku_precio_se_serializa_como_numero_json() -> None:
@@ -159,11 +166,8 @@ def test_stock_update_ejemplo_valida() -> None:
     SkuStockUpdate.model_validate(SkuStockUpdate.model_config["json_schema_extra"]["example"])
 
 
-@pytest.mark.parametrize(
-    "body",
-    [{"ajuste": 5}, {"ajuste": -2}, {"ajuste": -1, "minimo": 1}, {"minimo": 3}, {"minimo": 0}],
-)
-def test_stock_update_acepta_ajuste_minimo_o_ambos(body: dict[str, object]) -> None:
+@pytest.mark.parametrize("body", [{"minimo": 3}, {"minimo": 0}])
+def test_stock_update_solo_cambia_el_minimo(body: dict[str, object]) -> None:
     SkuStockUpdate.model_validate(body)
 
 
@@ -171,11 +175,9 @@ def test_stock_update_acepta_ajuste_minimo_o_ambos(body: dict[str, object]) -> N
     "body",
     [
         {},
-        {"ajuste": 0},
-        {"ajuste": True},
-        {"ajuste": "5"},
-        {"ajuste": 1.5},
-        {"ajuste": None},
+        # La cantidad entra y sale con movimientos del kardex.
+        {"ajuste": 5},
+        {"ajuste": -1, "minimo": 1},
         {"minimo": -1},
         {"minimo": None},
         {"cantidad": 9},

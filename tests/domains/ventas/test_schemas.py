@@ -13,6 +13,7 @@ from app.domains.ventas.schemas import (
     VentaResponse,
     VentaResponseAudit,
 )
+from app.domains.venta_pagos.schemas import MAX_PAGOS_POR_VENTA
 from app.shared.enums import CanalVenta, EstadoVenta, MetodoPago
 
 
@@ -20,12 +21,16 @@ def _item(**overrides: object) -> dict[str, object]:
     return {"sku_id": str(uuid4()), "cantidad": 1, **overrides}
 
 
+def _pago(**overrides: object) -> dict[str, object]:
+    return {"metodo": "EFECTIVO", "monto": "10.00", **overrides}
+
+
 def test_venta_create_valores_por_defecto() -> None:
     venta = VentaCreate.model_validate({"items": [_item()]})
 
     assert venta.estado == EstadoVenta.PENDIENTE
     assert venta.canal == CanalVenta.WHATSAPP
-    assert venta.metodo_pago == MetodoPago.EFECTIVO
+    assert venta.pagos == []
     assert venta.descuento == Decimal("0")
     assert venta.referencia is None
     assert venta.cliente_telefono is None
@@ -62,8 +67,15 @@ def test_venta_create_normaliza_textos() -> None:
         {"estado": None},
         {"canal": None},
         {"canal": "INSTAGRAM"},
-        {"metodo_pago": None},
-        {"metodo_pago": "TARJETA"},
+        {"metodo_pago": "QR"},
+        {"pagos": None},
+        {"pagos": [_pago(metodo="TARJETA")]},
+        {"pagos": [_pago(monto=0)]},
+        {"pagos": [_pago(monto=-5)]},
+        {"pagos": [_pago(monto=None)]},
+        {"pagos": [_pago(referencia="   ")]},
+        {"pagos": [_pago(venta_id=str(uuid4()))]},
+        {"pagos": [_pago() for _ in range(MAX_PAGOS_POR_VENTA + 1)]},
         {"descuento": -1},
         {"descuento": None},
         {"referencia": "   "},
@@ -98,6 +110,22 @@ def test_items_rechaza_mas_del_maximo(schema: type) -> None:
         schema.model_validate({"items": [_item() for _ in range(MAX_ITEMS_POR_VENTA + 1)]})
 
 
+def test_venta_create_acepta_pagos_mixtos() -> None:
+    venta = VentaCreate.model_validate(
+        {
+            "estado": "CONFIRMADA",
+            "items": [_item()],
+            "pagos": [_pago(monto="20.50"), _pago(metodo="QR", monto=9.5, referencia=" 0048213 ")],
+        }
+    )
+
+    assert [(pago.metodo, pago.monto) for pago in venta.pagos] == [
+        (MetodoPago.EFECTIVO, Decimal("20.50")),
+        (MetodoPago.QR, Decimal("9.5")),
+    ]
+    assert venta.pagos[1].referencia == "0048213"
+
+
 def test_venta_items_update_solo_marca_lo_enviado() -> None:
     data = VentaItemsUpdate.model_validate({"items": [_item()], "nota": None})
 
@@ -111,7 +139,8 @@ def test_venta_items_update_solo_marca_lo_enviado() -> None:
         {"items": None},
         {"items": []},
         {"canal": None},
-        {"metodo_pago": None},
+        {"metodo_pago": "QR"},
+        {"pagos": [_pago()]},
         {"descuento": None},
         {"estado": "CONFIRMADA"},
         {"recalcular_precios": None},
@@ -142,7 +171,25 @@ def test_venta_estado_update_acepta_confirmar_y_cancelar(estado: str) -> None:
     assert VentaEstadoUpdate.model_validate({"estado": estado}).estado == EstadoVenta(estado)
 
 
-@pytest.mark.parametrize("data", [{"estado": "PENDIENTE"}, {"estado": None}, {}, {"estado": "CONFIRMADA", "metodo_pago": "QR"}])
+def test_venta_estado_update_cobra_el_saldo_al_confirmar() -> None:
+    data = VentaEstadoUpdate.model_validate({"estado": "CONFIRMADA", "pagos": [_pago(metodo="QR")]})
+
+    assert [pago.metodo for pago in data.pagos] == [MetodoPago.QR]
+    assert VentaEstadoUpdate.model_validate({"estado": "CONFIRMADA"}).pagos == []
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"estado": "PENDIENTE"},
+        {"estado": None},
+        {},
+        {"estado": "CONFIRMADA", "metodo_pago": "QR"},
+        {"estado": "CONFIRMADA", "pagos": None},
+        {"estado": "CANCELADA", "pagos": []},
+        {"estado": "CANCELADA", "pagos": [_pago()]},
+    ],
+)
 def test_venta_estado_update_rechaza_invalidos(data: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         VentaEstadoUpdate.model_validate(data)
@@ -166,6 +213,9 @@ def test_ejemplo_de_detail_es_coherente() -> None:
         assert item.subtotal == (item.precio_unitario - item.descuento_unitario) * item.cantidad
     assert detail.subtotal == sum(item.subtotal for item in detail.items)
     assert detail.total == detail.subtotal - detail.descuento
+    # Cancelada después de confirmarse: estaba pagada completa y se devolvió todo.
+    assert detail.total_pagado == sum(pago.monto for pago in detail.pagos) == detail.total
+    assert all(pago.venta_id == detail.id for pago in detail.pagos)
     assert detail.estado == EstadoVenta.CANCELADA
     assert detail.confirmada_at is not None and detail.cancelada_at is not None
 

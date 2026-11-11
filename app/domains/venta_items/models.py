@@ -10,8 +10,8 @@ from app.core.base_model import BaseModel
 class VentaItem(BaseModel, table=True):
     """
     Línea de una venta. Guarda una copia (snapshot) del producto, color, talla,
-    código de barras y precios al momento de vender, para que el historial no
-    cambie aunque luego se edite o elimine el catálogo.
+    código de barras y precios al momento de vender, y el costo al confirmar,
+    para que el historial no cambie aunque luego se edite o elimine el catálogo.
     """
 
     __tablename__ = "venta_items"
@@ -36,6 +36,7 @@ class VentaItem(BaseModel, table=True):
             "subtotal = (precio_unitario - descuento_unitario) * cantidad",
             name="ck_venta_items_subtotal",
         ),
+        CheckConstraint("costo_unitario >= 0", name="ck_venta_items_costo_no_negativo"),
         {"schema": "public"},
     )
 
@@ -49,6 +50,9 @@ class VentaItem(BaseModel, table=True):
     # Descuento manual extra del cajero por unidad (la rebaja ya va en precio_unitario).
     descuento_unitario: Decimal = Field(default=Decimal("0"), sa_type=Numeric(12, 2), nullable=False)
     subtotal: Decimal = Field(sa_type=Numeric(12, 2), nullable=False)
+    # Costo promedio del SKU al confirmar la venta, para calcular la utilidad.
+    # Es null mientras la venta está pendiente. No se expone en la API de ventas.
+    costo_unitario: Decimal | None = Field(default=None, sa_type=Numeric(12, 2), nullable=True)
 
     producto_nombre: str = Field(max_length=200, nullable=False)
     color_nombre: str = Field(max_length=60, nullable=False)

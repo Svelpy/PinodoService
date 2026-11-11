@@ -26,6 +26,8 @@ ROLE_PERMISSIONS: dict[Role, dict[Module, frozenset[Action]]] = {
         Module.TALLA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.SKU: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),  # DELETE = anular una venta confirmada
+        Module.VENTA_PAGO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
+        Module.MOVIMIENTO_INVENTARIO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
     },
     # Dueño de la tienda. La auditoría (AUDIT) queda para SUPERADMIN.
     Role.OWNER: {
@@ -40,6 +42,8 @@ ROLE_PERMISSIONS: dict[Role, dict[Module, frozenset[Action]]] = {
         Module.TALLA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}),
         Module.SKU: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}),
         Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}),  # DELETE = anular una venta confirmada
+        Module.VENTA_PAGO: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),  # sin DELETE: un pago no se anula; se cancela la venta
+        Module.MOVIMIENTO_INVENTARIO: frozenset({Action.CREATE, Action.READ}),  # el kardex no se edita ni se elimina: se corrige con otro AJUSTE
     },
     # Encargado que administra la tienda por el dueño. No elimina (DELETE) en ningún módulo.
     Role.ADMIN: {
@@ -54,6 +58,8 @@ ROLE_PERMISSIONS: dict[Role, dict[Module, frozenset[Action]]] = {
         Module.TALLA: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),
         Module.SKU: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),
         Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),  # sin DELETE: no anula ventas confirmadas
+        Module.VENTA_PAGO: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),  # sin DELETE: un pago no se anula; se cancela la venta
+        Module.MOVIMIENTO_INVENTARIO: frozenset({Action.CREATE, Action.READ}),  # el kardex no se edita ni se elimina: se corrige con otro AJUSTE
     },
     # Atiende la caja: registra ventas y consulta el catálogo, precios y stock sin modificarlos.
     Role.CAJERO: {
@@ -68,6 +74,8 @@ ROLE_PERMISSIONS: dict[Role, dict[Module, frozenset[Action]]] = {
         Module.TALLA: frozenset({Action.READ}),  # el catálogo lo mantienen ADMIN y OWNER
         Module.SKU: frozenset({Action.READ}),  # consulta precios y stock; no los ajusta
         Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),  # cobra y cancela pendientes; anular una venta confirmada (DELETE) y la auditoría quedan para roles superiores
+        Module.VENTA_PAGO: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),  # cobra sus ventas; sin DELETE: un pago no se anula
+        Module.MOVIMIENTO_INVENTARIO: frozenset(),  # no ve costos ni mueve stock: las ventas lo mueven solas
     },
 }
 
@@ -84,7 +92,8 @@ ROLE_LEVEL: dict[Role, int] = {
 
 # Alcance de las ventas (segunda puerta, AGENTS.md §14): estos roles ven y
 # gestionan todas las ventas; los de VENTA_OWN_SCOPE_ROLES, solo las que
-# registraron. Un rol ausente de ambos grupos no ve ninguna.
+# registraron. Un rol ausente de ambos grupos no ve ninguna. Los pagos de
+# venta heredan este alcance: se ven y se gestionan a través de su venta.
 VENTA_GLOBAL_SCOPE_ROLES: frozenset[Role] = frozenset({Role.SUPERADMIN, Role.OWNER, Role.ADMIN})
 VENTA_OWN_SCOPE_ROLES: frozenset[Role] = frozenset({Role.CAJERO})
 

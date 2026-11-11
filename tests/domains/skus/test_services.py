@@ -1,8 +1,10 @@
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
+from app.domains.movimientos_inventario.repositories import MovimientoInventarioRepository
 from app.domains.producto_colores.models import ProductoColor
 from app.domains.producto_colores.repositories import ProductoColorRepository
 from app.domains.skus.models import Sku
@@ -11,6 +13,7 @@ from app.domains.skus.schemas import SkuCreate, SkuResponse
 from app.domains.skus.services import SkuService
 from app.domains.tallas.models import Talla
 from app.domains.tallas.repositories import TallaRepository
+from app.shared.enums import TipoMovimiento
 from app.shared.errors.exceptions import AppException
 
 
@@ -39,6 +42,7 @@ def _create_data(**overrides: object) -> SkuCreate:
         "producto_color_id": uuid4(),
         "talla_id": uuid4(),
         "precio": {"normal": "29.95", "rebajado": "19.90", "rebaja_hasta": "2026-12-31"},
+        "costo": "12.50",
         "stock": {"cantidad": 12, "minimo": 3},
     }
     values.update(overrides)
@@ -68,11 +72,24 @@ async def test_create_guarda_precio_y_stock_como_json() -> None:
         patch.object(SkuRepository, "get_active_by_color_and_talla", new=AsyncMock(return_value=None)),
         patch.object(SkuRepository, "get_active_by_codigo_barras", new=AsyncMock()) as by_codigo,
         patch.object(SkuRepository, "add") as add,
+        patch.object(MovimientoInventarioRepository, "add") as add_movimiento,
         patch.object(
             SkuService, "get", new=AsyncMock(side_effect=lambda *a, **k: add.call_args.args[0])
         ) as get,
     ):
         sku = await SkuService.create(session, _create_data(), actor_id)
+
+    # El stock inicial entra al kardex como un INGRESO a su costo.
+    [movimiento] = [call.args[0] for call in add_movimiento.call_args_list]
+    assert (movimiento.sku_id, movimiento.tipo, movimiento.cantidad, movimiento.saldo) == (
+        sku.id,
+        TipoMovimiento.INGRESO,
+        12,
+        12,
+    )
+    assert movimiento.costo_unitario == movimiento.costo_promedio == Decimal("12.50")
+    assert sku.costo == Decimal("12.50")
+    assert "costo" not in SkuResponse.model_validate(sku).model_dump()
 
     get.assert_awaited_once_with(session, sku.id, load_detail=True)
 
@@ -341,65 +358,39 @@ async def _update_stock(sku: Sku, body: dict[str, object], session: MagicMock | 
 
 
 @pytest.mark.asyncio
-async def test_ajuste_suma_y_resta_sobre_el_stock_actual() -> None:
-    sku = _sku()  # cantidad 5, mínimo 2
+async def test_minimo_conserva_la_cantidad() -> None:
+    sku = _sku()
     session = _session()
 
-    result = await _update_stock(sku, {"ajuste": 3}, session)  # recepción
-    assert result == "detail"
-    assert (sku.stock["cantidad"], sku.stock["minimo"]) == (8, 2)
-    assert sku.stock["actualizado"] is not None
+    result = await _update_stock(sku, {"minimo": 4}, session)
 
-    await _update_stock(sku, {"ajuste": -8})  # salen todas
-    assert sku.stock["cantidad"] == 0
+    assert result == "detail"
+    assert (sku.stock["cantidad"], sku.stock["minimo"]) == (5, 4)
+    assert sku.stock["actualizado"] is not None
     session.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_ajuste_se_aplica_sobre_lo_que_dejaron_las_ventas() -> None:
-    # La pantalla mostraba 5, pero una venta dejó 4: el ajuste +5 deja 9, sin pisar la venta.
-    sku = _sku(stock={"cantidad": 4, "minimo": 2, "actualizado": None})
+async def test_create_sin_stock_no_registra_movimiento() -> None:
+    p1, p2 = _referencias_validas()
 
-    await _update_stock(sku, {"ajuste": 5})
+    with (
+        p1,
+        p2,
+        patch.object(SkuRepository, "get_active_by_color_and_talla", new=AsyncMock(return_value=None)),
+        patch.object(SkuRepository, "get_active_by_codigo_barras", new=AsyncMock()),
+        patch.object(SkuRepository, "add") as add,
+        patch.object(MovimientoInventarioRepository, "add") as add_movimiento,
+        patch.object(SkuService, "get", new=AsyncMock(side_effect=lambda *a, **k: add.call_args.args[0])),
+    ):
+        sku = await SkuService.create(_session(), _create_data(stock={"cantidad": 0, "minimo": 1}), uuid4())
 
-    assert sku.stock["cantidad"] == 9
-
-
-@pytest.mark.asyncio
-async def test_ajuste_que_deja_stock_negativo_responde_409_con_el_stock_actual() -> None:
-    sku = _sku()
-    session = _session()
-
-    with pytest.raises(AppException) as error:
-        await _update_stock(sku, {"ajuste": -6}, session)
-
-    assert error.value.status_code == 409
-    assert error.value.details["stock_actual"] == 5
-    assert "ajuste" in error.value.details
-    assert sku.stock["cantidad"] == 5
-    session.commit.assert_not_awaited()
+    add_movimiento.assert_not_called()
+    assert (sku.stock["cantidad"], sku.stock["minimo"], sku.costo) == (0, 1, Decimal("12.50"))
 
 
 @pytest.mark.asyncio
-async def test_ajuste_y_minimo_juntos() -> None:
-    sku = _sku()
-
-    await _update_stock(sku, {"ajuste": -1, "minimo": 3})
-
-    assert (sku.stock["cantidad"], sku.stock["minimo"]) == (4, 3)
-
-
-@pytest.mark.asyncio
-async def test_solo_minimo_conserva_la_cantidad() -> None:
-    sku = _sku()
-
-    await _update_stock(sku, {"minimo": 4})
-
-    assert (sku.stock["cantidad"], sku.stock["minimo"]) == (5, 4)
-
-
-@pytest.mark.asyncio
-async def test_mismo_minimo_sin_ajuste_no_guarda_ni_renueva_la_fecha() -> None:
+async def test_mismo_minimo_no_guarda_ni_renueva_la_fecha() -> None:
     sku = _sku()
     session = _session()
 

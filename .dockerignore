@@ -1,0 +1,40 @@
+# Secretos
+.env
+.env.*
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Control de versiones e IDEs
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+
+# Tests y cachés
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+tests/
+pytest.ini
+requirements-dev.txt
+
+# Documentación y archivos sin uso en la imagen
+docs/
+*.md
+db.sql
+Procfile
+Dockerfile
+.dockerignore
+
+# Seeds: caché de Pixabay y galería de revisión (solo para generar seeds)
+seeds/data/pixabay_cache/
+seeds/data/galeria.html

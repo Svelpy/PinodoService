@@ -1514,7 +1514,117 @@ Preferir siempre código explícito, predecible y consistente.
 
 ---
 
-# 25. Mantenimiento de la documentación
+# 25. Docker y despliegue
+
+Las reglas viven en `AGENTS.md` §22. Esta sección contiene la referencia.
+
+## 25.1 Dockerfile de referencia
+
+Copiar esta estructura y adaptar solo las carpetas copiadas:
+
+```dockerfile
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# Dependencias antes del código para reutilizar la caché de Docker.
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+RUN useradd --create-home --uid 1000 appuser
+
+COPY alembic.ini .
+COPY migrations ./migrations
+COPY seeds ./seeds
+COPY app ./app
+
+USER appuser
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\", \"8000\")}/health', timeout=4)"
+
+# Migraciones antes de levantar la API. Requiere una sola réplica.
+# --proxy-headers: IP real del cliente detrás del proxy (Traefik en Dokploy).
+# PORT lo define la plataforma (Railway); si no existe se usa 8000 (Dokploy).
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]
+```
+
+Si `alembic upgrade head` falla, el contenedor no arranca. Con varias réplicas
+las migraciones se ejecutarían en paralelo; por eso se exige una sola, o mover
+la migración a un paso release/pre-deploy.
+
+## 25.2 `.dockerignore`
+
+Debe excluir como mínimo:
+
+```text
+.env
+.env.*
+.venv/ venv/ env/
+.git/ .gitignore .vscode/ .idea/
+**/__pycache__/ **/*.py[cod]
+.pytest_cache/ .mypy_cache/ .ruff_cache/ .coverage htmlcov/
+tests/ docs/ requirements-dev.txt pytest.ini Procfile *.md
+Dockerfile .dockerignore
+```
+
+## 25.3 Variables de entorno
+
+Formato de `.env.example`, compatible con `--env-file` y Dokploy:
+
+- `NOMBRE=valor`, sin espacios alrededor del `=`.
+- Sin comillas: Docker las incluye como parte del valor.
+- Comentarios solo en líneas propias con `#`, nunca al final de la línea.
+- Las variables vacías (`ENABLE_DOCS=`) se tratan en `Settings` como no
+  definidas.
+
+URLs de PostgreSQL:
+
+- Formato: `postgresql+asyncpg://USUARIO:PASSWORD@HOST:PUERTO/BASE`.
+- Codificar caracteres reservados del password (`@`→`%40`, `#`→`%23`,
+  `%`→`%25`…).
+- `?ssl=require`; asyncpg no acepta `?sslmode=require`.
+- Supabase: Session Pooler (5432). El Transaction Pooler (6543) rompe los
+  prepared statements de asyncpg, y la conexión directa requiere IPv6, que
+  Docker no tiene por defecto.
+- API en Docker y PostgreSQL en el host: `host.docker.internal`, no
+  `localhost`.
+- API y PostgreSQL en la misma red Docker/Dokploy: el nombre del servicio como
+  host.
+
+## 25.4 Uso
+
+```bash
+# Build
+docker build -t <proyecto>-api .
+
+# Ejecución local
+docker run --rm -p 8000:8000 --env-file .env <proyecto>-api
+
+# Seeds (no se ejecutan automáticamente)
+docker exec -it <contenedor> python -m seeds.<seed>
+```
+
+## 25.5 Checklist para un proyecto nuevo
+
+1. Copiar `Dockerfile` y `.dockerignore` de referencia.
+2. Separar `requirements.txt` y `requirements-dev.txt` con versiones fijadas.
+3. Implementar `/health` con comprobación real de PostgreSQL y `503` en fallo.
+4. Aplicar la misma regla de selección de base en la app y en Alembic.
+5. Crear `.env.example` con las reglas de formato de 25.3.
+6. Verificar con `docker build` + `docker run --env-file .env` que
+   `alembic upgrade head` termina y `/health` responde `200`.
+
+---
+
+# 26. Mantenimiento de la documentación
 
 `AGENTS.md` y `ARCHITECTURE.md` son documentos de la plantilla. Definen
 decisiones arquitectónicas transversales, estables y reutilizables; no funcionan

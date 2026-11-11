@@ -53,7 +53,25 @@ class Settings(BaseSettings):
     CLOUDINARY_CLOUD_NAME: str | None = None
     CLOUDINARY_API_KEY: str | None = None
     CLOUDINARY_API_SECRET: str | None = None
-    CLOUDINARY_FOLDER_NAME: str | None = None
+    CLOUDINARY_FOLDER_NAME_PRODUCTION: str | None = None
+    TEST_CLOUDINARY_FOLDER_NAME: str | None = None
+    @property
+    def CLOUDINARY_FOLDER_NAME(self) -> str:
+        if self.ENVIRONMENT == "production":
+            folder = self.CLOUDINARY_FOLDER_NAME_PRODUCTION
+            variable_name = "CLOUDINARY_FOLDER_NAME_PRODUCTION"
+        else:
+            folder = self.TEST_CLOUDINARY_FOLDER_NAME
+            variable_name = "TEST_CLOUDINARY_FOLDER_NAME"
+
+        if not folder:
+            raise ValueError(f"Debe configurarse {variable_name} para Cloudinary")
+        return folder
+
+    # =================================
+    # Pixabay (solo para seeds)
+    # =================================
+    PIXABAY_API_KEY: SecretStr | None = None
     # =================================
     # CORS
     # =================================
@@ -131,6 +149,8 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",
+        # NOMBRE= vacío equivale a no definida (formato de --env-file y Dokploy).
+        env_ignore_empty=True,
     )
     
 @lru_cache

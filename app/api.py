@@ -6,6 +6,7 @@ from app.domains.categorias.routes import router as categorias_router
 from app.domains.colores.routes import router as colores_router
 from app.domains.config.routes import router as config_router
 from app.domains.imagenes.routes import router as imagenes_router
+from app.domains.movimientos_inventario.routes import router as movimientos_inventario_router
 from app.domains.producto_colores.routes import router as producto_colores_router
 from app.domains.productos.routes import router as productos_router
 from app.domains.secciones.routes import router as secciones_router
@@ -13,6 +14,7 @@ from app.domains.skus.routes import router as skus_router
 from app.domains.tallas.routes import router as tallas_router
 from app.domains.tienda.routes import router as tienda_router
 from app.domains.usuarios.routes import router as usuarios_router
+from app.domains.venta_pagos.routes import router as venta_pagos_router
 from app.domains.ventas.routes import router as ventas_router
 
 
@@ -28,7 +30,9 @@ no_system_router.include_router(productos_router)
 no_system_router.include_router(producto_colores_router)
 no_system_router.include_router(imagenes_router)
 no_system_router.include_router(skus_router)
+no_system_router.include_router(movimientos_inventario_router)
 no_system_router.include_router(ventas_router)
+no_system_router.include_router(venta_pagos_router)
 no_system_router.include_router(tienda_router)
 
 

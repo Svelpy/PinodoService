@@ -59,7 +59,7 @@ def test_cajero_solo_lee_y_no_gestiona_usuarios() -> None:
     cajero = ROLE_PERMISSIONS[Role.CAJERO]
     assert cajero[Module.USUARIO] == frozenset()
     for module, actions in cajero.items():
-        if module not in {Module.USUARIO, Module.VENTA}:
+        if module not in {Module.USUARIO, Module.VENTA, Module.VENTA_PAGO, Module.MOVIMIENTO_INVENTARIO}:
             assert actions == frozenset({Action.READ}), module
 
 
@@ -70,6 +70,23 @@ def test_cajero_vende_pero_no_anula_ventas_confirmadas() -> None:
     )
     for role in (Role.SUPERADMIN, Role.OWNER):
         assert Action.DELETE in ROLE_PERMISSIONS[role][Module.VENTA], role
+
+
+def test_kardex_no_se_edita_y_el_cajero_no_ve_costos() -> None:
+    # Un movimiento se corrige con otro AJUSTE; los costos solo los ve quien accede al kardex.
+    for role in (Role.OWNER, Role.ADMIN):
+        assert ROLE_PERMISSIONS[role][Module.MOVIMIENTO_INVENTARIO] == frozenset(
+            {Action.CREATE, Action.READ}
+        ), role
+    assert ROLE_PERMISSIONS[Role.CAJERO][Module.MOVIMIENTO_INVENTARIO] == frozenset()
+
+
+def test_pagos_de_venta_no_se_anulan_salvo_superadmin() -> None:
+    # Ningún endpoint elimina pagos; la devolución se hace cancelando la venta.
+    for role in (Role.OWNER, Role.ADMIN, Role.CAJERO):
+        assert ROLE_PERMISSIONS[role][Module.VENTA_PAGO] == frozenset(
+            {Action.CREATE, Action.READ, Action.UPDATE}
+        ), role
 
 
 def test_superadmin_tiene_todas_las_acciones_en_todos_los_modulos() -> None:
@@ -88,8 +105,9 @@ def test_admin_no_elimina() -> None:
 
 
 def test_todo_rol_con_acceso_a_ventas_tiene_alcance() -> None:
-    con_acceso = {role for role in Role if ROLE_PERMISSIONS[role][Module.VENTA]}
-    assert con_acceso == VENTA_GLOBAL_SCOPE_ROLES | VENTA_OWN_SCOPE_ROLES
+    for module in (Module.VENTA, Module.VENTA_PAGO):
+        con_acceso = {role for role in Role if ROLE_PERMISSIONS[role][module]}
+        assert con_acceso == VENTA_GLOBAL_SCOPE_ROLES | VENTA_OWN_SCOPE_ROLES, module
     assert not VENTA_GLOBAL_SCOPE_ROLES & VENTA_OWN_SCOPE_ROLES
 
 

@@ -175,17 +175,13 @@ async def get_sku_audit(
 @router.patch(
     "/{sku_id}/stock",
     response_model=SkuDetail,
-    summary="Ajustar stock de un SKU",
+    summary="Cambiar stock mínimo de un SKU",
     description=(
-        "ajuste es cuántas prendas entran (positivo, por ejemplo una recepción) o "
-        "salen (negativo, por ejemplo una merma); se suma al stock actual, así "
-        "que nunca pisa lo que mueven las ventas. No puede ser 0, y si el stock "
-        "quedara negativo responde 409 con stock_actual en details. minimo es "
-        "el stock a partir del cual el SKU aparece como bajo mínimo. Se envía "
-        "uno de los dos o ambos. Las ventas pendientes no reservan stock. "
-        "Responde el SKU, igual que GET /skus/{id}."
+        "minimo es el stock a partir del cual el SKU aparece como bajo mínimo. "
+        "La cantidad no se cambia aquí: entra y sale con movimientos del kardex "
+        "(POST /movimientos-inventario/). Responde el SKU, igual que GET /skus/{id}."
     ),
-    responses=_error_responses(401, 403, 404, 409, 422, 500),
+    responses=_error_responses(401, 403, 404, 422, 500),
 )
 async def update_sku_stock(
     sku_id: UUID,

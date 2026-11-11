@@ -7,6 +7,7 @@ from app.domains.colores.models import Color
 from app.domains.config.models import Config
 from app.domains.error_logs.models import ErrorLog
 from app.domains.imagenes.models import Imagen
+from app.domains.movimientos_inventario.models import MovimientoInventario
 from app.domains.producto_colores.models import ProductoColor
 from app.domains.productos.models import Producto
 from app.domains.secciones.models import Seccion
@@ -14,6 +15,7 @@ from app.domains.skus.models import Sku
 from app.domains.tallas.models import Talla
 from app.domains.usuarios.models import Usuario
 from app.domains.venta_items.models import VentaItem
+from app.domains.venta_pagos.models import VentaPago
 from app.domains.ventas.models import Venta
 
 __all__ = [
@@ -24,6 +26,7 @@ __all__ = [
     "Config",
     "ErrorLog",
     "Imagen",
+    "MovimientoInventario",
     "Producto",
     "ProductoColor",
     "Seccion",
@@ -32,4 +35,5 @@ __all__ = [
     "Usuario",
     "Venta",
     "VentaItem",
+    "VentaPago",
 ]

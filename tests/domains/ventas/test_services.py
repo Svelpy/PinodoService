@@ -8,14 +8,18 @@ import pytest
 
 from app.core.config import get_settings
 from app.domains.auth.schemas import CurrentUser
+from app.domains.movimientos_inventario.models import MovimientoInventario
+from app.domains.movimientos_inventario.repositories import MovimientoInventarioRepository
 from app.domains.skus.models import Sku
 from app.domains.venta_items.models import VentaItem
 from app.domains.venta_items.repositories import SkuParaVenta, VentaItemRepository
+from app.domains.venta_pagos.models import VentaPago
+from app.domains.venta_pagos.repositories import VentaPagoRepository
 from app.domains.ventas.models import Venta
 from app.domains.ventas.repositories import VentaRepository, VentaScope
 from app.domains.ventas.schemas import VentaCreate, VentaEstadoUpdate, VentaItemsUpdate
 from app.domains.ventas.services import VentaService
-from app.shared.enums import EstadoVenta, Role
+from app.shared.enums import EstadoVenta, MetodoPago, Role, TipoMovimiento
 from app.shared.errors.exceptions import AppException
 
 
@@ -36,6 +40,7 @@ def _sku_venta(
     rebajado: float | None = None,
     cantidad: int = 10,
     nombre: str = "Camisa Oxford",
+    costo: str = "12.50",
 ) -> SkuParaVenta:
     sku = Sku(
         producto_color_id=uuid4(),
@@ -47,6 +52,7 @@ def _sku_venta(
             "rebaja_hasta": "2099-12-31" if rebajado is not None else None,
         },
         stock={"cantidad": cantidad, "minimo": 2, "actualizado": None},
+        costo=Decimal(costo),
     )
     return SkuParaVenta(sku, nombre, "Azul marino", "M")
 
@@ -73,7 +79,20 @@ def _venta(estado: EstadoVenta, *skus: tuple[SkuParaVenta, int]) -> Venta:
     venta.items = [_item(sku_venta, venta, cantidad) for sku_venta, cantidad in skus]
     venta.subtotal = sum((item.subtotal for item in venta.items), Decimal("0"))
     venta.total = venta.subtotal
+    # Sin fiado: una venta confirmada está pagada completa.
+    if estado == EstadoVenta.CONFIRMADA:
+        venta.total_pagado = venta.total
     return venta
+
+
+def _pago(monto: str, metodo: str = "EFECTIVO") -> dict[str, str]:
+    return {"metodo": metodo, "monto": monto}
+
+
+def _confirmacion(*pagos: dict[str, str], recalcular: bool = False) -> VentaEstadoUpdate:
+    return VentaEstadoUpdate.model_validate(
+        {"estado": "CONFIRMADA", "recalcular_precios": recalcular, "pagos": list(pagos)}
+    )
 
 
 @contextmanager
@@ -91,6 +110,8 @@ def _repos(
         patch.object(VentaItemRepository, "add") as add_item,
         patch.object(VentaItemRepository, "soft_delete_by_ids", new=AsyncMock(return_value=0)) as soft_delete,
         patch.object(VentaRepository, "add") as add_venta,
+        patch.object(VentaPagoRepository, "add") as add_pago,
+        patch.object(MovimientoInventarioRepository, "add") as add_movimiento,
         patch.object(VentaRepository, "get_by_id", new=AsyncMock(return_value=venta)) as get_by_id,
         patch.object(VentaService, "_reload", new=AsyncMock(side_effect=lambda s, venta_id, a: venta_id)),
     ):
@@ -99,12 +120,22 @@ def _repos(
             "add_item": add_item,
             "soft_delete": soft_delete,
             "add_venta": add_venta,
+            "add_pago": add_pago,
+            "add_movimiento": add_movimiento,
             "get_by_id": get_by_id,
         }
 
 
 def _added_items(repos: dict[str, MagicMock]) -> list[VentaItem]:
     return [call.args[0] for call in repos["add_item"].call_args_list]
+
+
+def _added_pagos(repos: dict[str, MagicMock]) -> list[VentaPago]:
+    return [call.args[0] for call in repos["add_pago"].call_args_list]
+
+
+def _added_movimientos(repos: dict[str, MagicMock]) -> list[MovimientoInventario]:
+    return [call.args[0] for call in repos["add_movimiento"].call_args_list]
 
 
 # ---------------------------------------------------------------- alcance
@@ -186,7 +217,12 @@ async def test_create_conserva_el_orden_de_los_items() -> None:
 async def test_create_confirmada_descuenta_stock() -> None:
     camisa = _sku_venta(cantidad=5)
     data = VentaCreate.model_validate(
-        {"estado": "CONFIRMADA", "canal": "TIENDA", "items": [{"sku_id": str(camisa.sku.id), "cantidad": 2}]}
+        {
+            "estado": "CONFIRMADA",
+            "canal": "TIENDA",
+            "items": [{"sku_id": str(camisa.sku.id), "cantidad": 2}],
+            "pagos": [_pago("59.90")],
+        }
     )
 
     with _repos(skus={camisa.sku.id: camisa}) as repos:
@@ -194,9 +230,19 @@ async def test_create_confirmada_descuenta_stock() -> None:
 
     venta = repos["add_venta"].call_args.args[0]
     assert venta.confirmada_at is not None
+    assert venta.total_pagado == venta.total == Decimal("59.90")
     assert camisa.sku.stock["cantidad"] == 3
     assert camisa.sku.stock["actualizado"] is not None
     assert repos["get_skus"].call_args.kwargs["for_update"] is True
+    # La salida queda en el kardex y el ítem copia el costo del SKU.
+    [movimiento] = _added_movimientos(repos)
+    assert (movimiento.tipo, movimiento.cantidad, movimiento.saldo, movimiento.venta_id) == (
+        TipoMovimiento.VENTA,
+        -2,
+        3,
+        venta.id,
+    )
+    assert _added_items(repos)[0].costo_unitario == Decimal("12.50")
 
 
 @pytest.mark.asyncio
@@ -211,6 +257,7 @@ async def test_create_confirmada_sin_stock_suficiente_responde_409_sin_tocar_nad
                 {"sku_id": str(camisa.sku.id), "cantidad": 2},
                 {"sku_id": str(pantalon.sku.id), "cantidad": 3},
             ],
+            "pagos": [_pago("149.75")],
         }
     )
 
@@ -434,12 +481,11 @@ async def test_confirmar_descuenta_stock_y_fija_confirmada_at() -> None:
     actor = _actor()
 
     with _repos(skus={camisa.sku.id: camisa}, venta=venta) as repos:
-        await VentaService.change_estado(
-            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CONFIRMADA), actor, get_settings()
-        )
+        await VentaService.change_estado(_session(), venta.id, _confirmacion(_pago("59.90")), actor, get_settings())
 
     assert venta.estado == EstadoVenta.CONFIRMADA
     assert venta.confirmada_at is not None
+    assert venta.total_pagado == Decimal("59.90")
     assert venta.cancelada_at is None
     assert venta.updated_by == actor.id
     assert camisa.sku.stock["cantidad"] == 3
@@ -451,14 +497,15 @@ async def test_confirmar_sin_stock_responde_409() -> None:
     camisa = _sku_venta(cantidad=1)
     venta = _venta(EstadoVenta.PENDIENTE, (camisa, 2))
 
-    with _repos(skus={camisa.sku.id: camisa}, venta=venta), pytest.raises(AppException) as error:
-        await VentaService.change_estado(
-            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CONFIRMADA), _actor(), get_settings()
-        )
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta) as repos, pytest.raises(AppException) as error:
+        await VentaService.change_estado(_session(), venta.id, _confirmacion(_pago("59.90")), _actor(), get_settings())
 
+    repos["add_movimiento"].assert_not_called()
     assert error.value.status_code == 409
+    assert "Stock insuficiente" in error.value.message
     assert venta.estado == EstadoVenta.PENDIENTE
     assert camisa.sku.stock["cantidad"] == 1
+    assert venta.items[0].costo_unitario is None
 
 
 @pytest.mark.asyncio
@@ -507,18 +554,78 @@ async def test_cajero_no_puede_anular_confirmada() -> None:
 
 
 @pytest.mark.asyncio
-async def test_admin_anula_confirmada_y_devuelve_stock() -> None:
+async def test_owner_anula_confirmada_devuelve_stock_y_conserva_lo_pagado() -> None:
     camisa = _sku_venta(cantidad=3)
     venta = _venta(EstadoVenta.CONFIRMADA, (camisa, 2))
 
-    with _repos(skus={camisa.sku.id: camisa}, venta=venta):
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta) as repos:
         await VentaService.change_estado(
-            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CANCELADA), _actor(Role.ADMIN), get_settings()
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CANCELADA), _actor(Role.OWNER), get_settings()
         )
 
     assert venta.estado == EstadoVenta.CANCELADA
     assert venta.cancelada_at is not None
     assert camisa.sku.stock["cantidad"] == 5
+    # Se devuelven todos los pagos: total_pagado queda como lo devuelto.
+    assert venta.total_pagado == Decimal("59.90")
+    repos["add_pago"].assert_not_called()
+    [movimiento] = _added_movimientos(repos)
+    assert (movimiento.tipo, movimiento.cantidad, movimiento.saldo, movimiento.venta_id) == (
+        TipoMovimiento.ANULACION,
+        2,
+        5,
+        venta.id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_confirmar_registra_la_venta_en_el_kardex_y_copia_el_costo() -> None:
+    camisa = _sku_venta(cantidad=5, costo="12.50")
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 2))
+    actor = _actor()
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta) as repos:
+        await VentaService.change_estado(_session(), venta.id, _confirmacion(_pago("59.90")), actor, get_settings())
+
+    [movimiento] = _added_movimientos(repos)
+    assert movimiento.sku_id == camisa.sku.id
+    assert (movimiento.tipo, movimiento.cantidad, movimiento.saldo) == (TipoMovimiento.VENTA, -2, 3)
+    assert movimiento.costo_unitario == movimiento.costo_promedio == Decimal("12.50")
+    assert movimiento.created_by == actor.id
+    assert venta.items[0].costo_unitario == Decimal("12.50")
+    # Una venta no cambia el costo promedio.
+    assert camisa.sku.costo == Decimal("12.50")
+
+
+@pytest.mark.asyncio
+async def test_anular_devuelve_al_costo_con_que_salio_y_recalcula_el_promedio() -> None:
+    # Salieron 2 a 10; mientras tanto el promedio subió a 16 con 2 en stock.
+    camisa = _sku_venta(cantidad=2, costo="16")
+    venta = _venta(EstadoVenta.CONFIRMADA, (camisa, 2))
+    venta.items[0].costo_unitario = Decimal("10")
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta) as repos:
+        await VentaService.change_estado(
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CANCELADA), _actor(Role.OWNER), get_settings()
+        )
+
+    [movimiento] = _added_movimientos(repos)
+    assert movimiento.costo_unitario == Decimal("10")
+    assert camisa.sku.costo == movimiento.costo_promedio == Decimal("13.00")
+
+
+@pytest.mark.asyncio
+async def test_anular_omite_skus_eliminados_en_el_kardex() -> None:
+    camisa = _sku_venta(cantidad=3)
+    venta = _venta(EstadoVenta.CONFIRMADA, (camisa, 2))
+
+    with _repos(skus={}, venta=venta) as repos:
+        await VentaService.change_estado(
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CANCELADA), _actor(Role.OWNER), get_settings()
+        )
+
+    assert venta.estado == EstadoVenta.CANCELADA
+    repos["add_movimiento"].assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -550,12 +657,13 @@ async def _confirmar(
     *skus: SkuParaVenta,
     actor: CurrentUser | None = None,
     recalcular: bool = True,
+    pagos: tuple[dict[str, str], ...] = (),
 ) -> None:
     with _repos(skus={s.sku.id: s for s in skus}, venta=venta):
         await VentaService.change_estado(
             _session(),
             venta.id,
-            VentaEstadoUpdate(estado=EstadoVenta.CONFIRMADA, recalcular_precios=recalcular),
+            _confirmacion(*pagos, recalcular=recalcular),
             actor or _actor(),
             get_settings(),
         )
@@ -572,7 +680,7 @@ async def test_confirmar_cobra_el_precio_y_los_nombres_del_dia() -> None:
     camisa = SkuParaVenta(camisa.sku, "Camisa Oxford slim", "Azul marino", "M")
     actor = _actor()
 
-    await _confirmar(venta, camisa, actor=actor)
+    await _confirmar(venta, camisa, actor=actor, pagos=(_pago("150"),))
 
     [item] = venta.items
     assert (item.precio_normal, item.precio_unitario) == (Decimal("100"), Decimal("80"))
@@ -589,7 +697,7 @@ async def test_confirmar_sin_cambios_en_el_catalogo_no_toca_los_items() -> None:
     camisa = _sku_venta()
     venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1))
 
-    await _confirmar(venta, camisa)
+    await _confirmar(venta, camisa, pagos=(_pago("29.95"),))
 
     assert venta.items[0].updated_by is None
     assert venta.estado == EstadoVenta.CONFIRMADA
@@ -652,9 +760,7 @@ async def test_confirmar_por_defecto_cobra_la_proforma_tal_como_se_ofrecio() -> 
     camisa.sku.precio = {"normal": 50, "rebajado": None, "rebaja_hasta": None}
 
     with _repos(skus={camisa.sku.id: camisa}, venta=venta):
-        await VentaService.change_estado(
-            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CONFIRMADA), _actor(), get_settings()
-        )
+        await VentaService.change_estado(_session(), venta.id, _confirmacion(_pago("30")), _actor(), get_settings())
 
     [item] = venta.items
     assert (item.precio_unitario, item.subtotal) == (Decimal("100"), Decimal("30"))
@@ -662,3 +768,204 @@ async def test_confirmar_por_defecto_cobra_la_proforma_tal_como_se_ofrecio() -> 
     assert venta.total == Decimal("30")
     assert venta.estado == EstadoVenta.CONFIRMADA
     assert camisa.sku.stock["cantidad"] == 4
+
+
+# ---------------------------------------------------------------- pagos
+
+
+@pytest.mark.asyncio
+async def test_create_pendiente_registra_anticipo() -> None:
+    camisa = _sku_venta(normal=100)
+    actor = _actor()
+    data = VentaCreate.model_validate(
+        {
+            "items": [{"sku_id": str(camisa.sku.id), "cantidad": 1}],
+            "pagos": [{"metodo": "QR", "monto": "40", "referencia": "0048213"}],
+        }
+    )
+
+    with _repos(skus={camisa.sku.id: camisa}) as repos:
+        await VentaService.create(_session(), data, actor, get_settings())
+
+    venta = repos["add_venta"].call_args.args[0]
+    [pago] = _added_pagos(repos)
+    assert (pago.venta_id, pago.metodo, pago.monto, pago.referencia) == (
+        venta.id,
+        MetodoPago.QR,
+        Decimal("40"),
+        "0048213",
+    )
+    assert pago.created_by == pago.updated_by == actor.id
+    assert venta.estado == EstadoVenta.PENDIENTE
+    assert venta.total_pagado == Decimal("40")
+    assert camisa.sku.stock["cantidad"] == 10
+
+
+@pytest.mark.asyncio
+async def test_create_confirmada_con_pagos_mixtos_conserva_el_orden() -> None:
+    camisa = _sku_venta(normal=100)
+    data = VentaCreate.model_validate(
+        {
+            "estado": "CONFIRMADA",
+            "items": [{"sku_id": str(camisa.sku.id), "cantidad": 3}],
+            "pagos": [_pago("200"), _pago("50", "QR"), _pago("50", "TRANSFERENCIA")],
+        }
+    )
+
+    with _repos(skus={camisa.sku.id: camisa}) as repos:
+        await VentaService.create(_session(), data, _actor(), get_settings())
+
+    venta = repos["add_venta"].call_args.args[0]
+    pagos = _added_pagos(repos)
+    assert [pago.metodo for pago in pagos] == [MetodoPago.EFECTIVO, MetodoPago.QR, MetodoPago.TRANSFERENCIA]
+    assert all(a.created_at < b.created_at for a, b in zip(pagos, pagos[1:]))
+    assert venta.total_pagado == venta.total == Decimal("300")
+    assert venta.estado == EstadoVenta.CONFIRMADA
+
+
+@pytest.mark.parametrize("pagos", [[], [_pago("99.99")], [_pago("50"), _pago("49.99", "QR")]])
+@pytest.mark.asyncio
+async def test_create_confirmada_sin_cubrir_el_total_responde_409_sin_tocar_stock(
+    pagos: list[dict[str, str]],
+) -> None:
+    camisa = _sku_venta(normal=100, cantidad=5)
+    session = _session()
+    data = VentaCreate.model_validate(
+        {"estado": "CONFIRMADA", "items": [{"sku_id": str(camisa.sku.id), "cantidad": 1}], "pagos": pagos}
+    )
+
+    with _repos(skus={camisa.sku.id: camisa}), pytest.raises(AppException) as error:
+        await VentaService.create(session, data, _actor(), get_settings())
+
+    assert error.value.status_code == 409
+    assert "Falta cobrar" in error.value.message
+    assert "pagos" in error.value.details
+    assert camisa.sku.stock["cantidad"] == 5
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.parametrize("estado", ["PENDIENTE", "CONFIRMADA"])
+@pytest.mark.asyncio
+async def test_create_con_pagos_mayores_al_total_responde_409(estado: str) -> None:
+    camisa = _sku_venta(normal=100)
+    data = VentaCreate.model_validate(
+        {
+            "estado": estado,
+            "items": [{"sku_id": str(camisa.sku.id), "cantidad": 1}],
+            "pagos": [_pago("80"), _pago("20.01", "QR")],
+        }
+    )
+
+    with _repos(skus={camisa.sku.id: camisa}), pytest.raises(AppException) as error:
+        await VentaService.create(_session(), data, _actor(), get_settings())
+
+    assert error.value.status_code == 409
+    assert "superan el saldo" in error.value.message
+
+
+@pytest.mark.asyncio
+async def test_confirmar_suma_anticipo_y_saldo() -> None:
+    camisa = _sku_venta(normal=100, cantidad=5)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1))
+    venta.total_pagado = Decimal("40")  # anticipo por QR
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta) as repos:
+        await VentaService.change_estado(_session(), venta.id, _confirmacion(_pago("60")), _actor(), get_settings())
+
+    [saldo] = _added_pagos(repos)
+    assert (saldo.venta_id, saldo.monto) == (venta.id, Decimal("60"))
+    assert venta.total_pagado == Decimal("100")
+    assert venta.estado == EstadoVenta.CONFIRMADA
+    assert camisa.sku.stock["cantidad"] == 4
+
+
+@pytest.mark.asyncio
+async def test_confirmar_ya_pagada_con_anticipos_no_requiere_pagos() -> None:
+    camisa = _sku_venta(normal=100)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1))
+    venta.total_pagado = Decimal("100")
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta) as repos:
+        await VentaService.change_estado(_session(), venta.id, _confirmacion(), _actor(), get_settings())
+
+    assert venta.estado == EstadoVenta.CONFIRMADA
+    repos["add_pago"].assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_confirmar_con_saldo_pendiente_responde_409_sin_tocar_stock() -> None:
+    camisa = _sku_venta(normal=100, cantidad=5)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1))
+    venta.total_pagado = Decimal("40")
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta), pytest.raises(AppException) as error:
+        await VentaService.change_estado(_session(), venta.id, _confirmacion(_pago("30")), _actor(), get_settings())
+
+    assert error.value.status_code == 409
+    assert "Falta cobrar 30" in error.value.message
+    assert venta.estado == EstadoVenta.PENDIENTE
+    assert camisa.sku.stock["cantidad"] == 5
+
+
+@pytest.mark.asyncio
+async def test_confirmar_recalculando_por_debajo_de_lo_pagado_responde_409() -> None:
+    camisa = _sku_venta(normal=100, cantidad=5)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1))
+    venta.total_pagado = Decimal("100")
+    camisa.sku.precio = {"normal": 80, "rebajado": None, "rebaja_hasta": None}  # bajó el precio
+
+    with pytest.raises(AppException) as error:
+        await _confirmar(venta, camisa)
+
+    assert error.value.status_code == 409
+    assert "menor que lo ya pagado" in error.value.message
+    assert venta.estado == EstadoVenta.PENDIENTE
+    assert camisa.sku.stock["cantidad"] == 5
+
+
+@pytest.mark.asyncio
+async def test_replace_items_no_baja_el_total_de_lo_pagado() -> None:
+    camisa = _sku_venta(normal=100)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 2))
+    venta.total_pagado = Decimal("150")
+    session = _session()
+    data = VentaItemsUpdate.model_validate({"items": [{"sku_id": str(camisa.sku.id), "cantidad": 1}]})
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta), pytest.raises(AppException) as error:
+        await VentaService.replace_items(session, venta.id, data, _actor(), get_settings())
+
+    assert error.value.status_code == 409
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cancelar_pendiente_con_anticipo_lo_devuelve() -> None:
+    camisa = _sku_venta(normal=100)
+    venta = _venta(EstadoVenta.PENDIENTE, (camisa, 1))
+    venta.total_pagado = Decimal("40")
+
+    with _repos(skus={camisa.sku.id: camisa}, venta=venta) as repos:
+        await VentaService.change_estado(
+            _session(), venta.id, VentaEstadoUpdate(estado=EstadoVenta.CANCELADA), _actor(), get_settings()
+        )
+
+    assert venta.estado == EstadoVenta.CANCELADA
+    assert venta.total_pagado == Decimal("40")
+    repos["add_pago"].assert_not_called()
+
+
+def test_resumen_suma_pagos_por_metodo_y_anticipos() -> None:
+    resumen = VentaService._resumen(
+        {
+            EstadoVenta.CONFIRMADA: (Decimal("300"), Decimal("300")),
+            EstadoVenta.PENDIENTE: (Decimal("160"), Decimal("50")),
+        },
+        {MetodoPago.EFECTIVO: Decimal("200"), MetodoPago.QR: Decimal("100")},
+    )
+
+    assert resumen.confirmada.efectivo == Decimal("200")
+    assert resumen.confirmada.qr == Decimal("100")
+    assert resumen.confirmada.transferencia == Decimal("0")
+    assert resumen.confirmada.total == Decimal("300")
+    assert (resumen.pendiente, resumen.pendiente_pagado) == (Decimal("160"), Decimal("50"))
+    assert resumen.cancelada == Decimal("0")

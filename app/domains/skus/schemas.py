@@ -17,8 +17,8 @@ from app.shared.services.validators import (
     validator_barcode,
     validator_boolean,
     validator_date,
-    validator_integer,
     validator_non_negative_integer,
+    validator_non_negative_money,
     validator_positive_money,
 )
 
@@ -111,29 +111,12 @@ class SkuStockInput(BaseModel):
 
 class SkuStockUpdate(BaseModel):
     """
-    Entrada de PATCH /skus/{id}/stock.
-
-    - ajuste: cuántas prendas entran (positivo, por ejemplo una recepción) o
-      salen (negativo, por ejemplo una merma). Se suma al stock actual con el
-      SKU bloqueado, así que nunca pisa lo que mueven las ventas. No puede ser
-      0 ni dejar el stock en negativo.
-    - minimo: stock a partir del cual el SKU aparece como bajo mínimo.
-
-    Se envía uno de los dos o ambos.
+    Entrada de PATCH /skus/{id}/stock: minimo es el stock a partir del cual el
+    SKU aparece como bajo mínimo. La cantidad no se cambia aquí: entra y sale
+    con movimientos del kardex (POST /movimientos-inventario/).
     """
 
-    ajuste: int | None = Field(default=None)
-    minimo: int | None = Field(default=None, ge=0)
-
-    @field_validator("ajuste", mode="before")
-    @classmethod
-    def validate_ajuste(cls, value: object) -> int:
-        if value is None:
-            raise ValueError("El ajuste no puede ser null.")
-        ajuste = validator_integer(value)
-        if ajuste == 0:
-            raise ValueError("El ajuste no puede ser 0.")
-        return ajuste
+    minimo: int = Field(..., ge=0)
 
     @field_validator("minimo", mode="before")
     @classmethod
@@ -142,15 +125,9 @@ class SkuStockUpdate(BaseModel):
             raise ValueError("El mínimo no puede ser null.")
         return validator_non_negative_integer(value)
 
-    @model_validator(mode="after")
-    def validate_algo_que_cambiar(self) -> "SkuStockUpdate":
-        if self.ajuste is None and self.minimo is None:
-            raise ValueError("Envía ajuste, minimo o ambos.")
-        return self
-
     model_config = ConfigDict(
         extra="forbid",
-        json_schema_extra={"example": {"ajuste": 5, "minimo": 2}},
+        json_schema_extra={"example": {"minimo": 2}},
     )
 
 
@@ -178,12 +155,17 @@ class SkuDetailCreate(BaseModel):
 
     No lleva producto_color_id: lo asigna el service al crear su color. Es la
     base de SkuCreate, para que ambos apliquen las mismas validaciones.
+
+    costo es lo que cuesta cada prenda; no se devuelve en la respuesta del SKU
+    (se consulta en GET /movimientos-inventario/costos). stock.cantidad entra
+    al kardex como un INGRESO inicial a ese costo.
     """
 
     talla_id: UUID = Field(...)
     codigo_barras: str | None = Field(default=None, min_length=1, max_length=50)
     is_visible: bool = Field(default=True)
     precio: SkuPrecio = Field(...)
+    costo: Decimal = Field(default=Decimal("0"), max_digits=12, decimal_places=2)
     stock: SkuStockInput = Field(default_factory=SkuStockInput)
 
     @field_validator("codigo_barras", mode="before")
@@ -200,6 +182,13 @@ class SkuDetailCreate(BaseModel):
             raise ValueError("La visibilidad no puede ser null.")
         return validator_boolean(value)
 
+    @field_validator("costo", mode="before")
+    @classmethod
+    def validate_costo(cls, value: object) -> Decimal:
+        if value is None:
+            raise ValueError("El costo no puede ser null.")
+        return validator_non_negative_money(value)
+
     @field_validator("stock", mode="before")
     @classmethod
     def validate_stock(cls, value: object) -> object:
@@ -215,6 +204,7 @@ class SkuDetailCreate(BaseModel):
                 "codigo_barras": "8412345678905",
                 "is_visible": True,
                 "precio": {"normal": 29.95, "rebajado": 19.95, "rebaja_hasta": "2026-12-31"},
+                "costo": 12.5,
                 "stock": {"cantidad": 12, "minimo": 3},
             }
         },
@@ -245,9 +235,11 @@ class SkuDetailUpdate(SkuDetailCreate):
     - Sin id: crea un SKU nuevo, con las mismas reglas que SkuDetailCreate;
       stock es opcional y vale 0 si se omite.
     - Con id: actualiza ese SKU. Solo cambian los campos enviados; precio se
-      envía completo y reemplaza al anterior. No admite stock: el de un SKU que
-      ya existe se ajusta con PATCH /skus/{id}/stock, para no pisar lo que las
-      ventas descontaron mientras el formulario estaba abierto.
+      envía completo y reemplaza al anterior. costo corrige el costo promedio
+      sin registrar un movimiento. No admite stock: el de un SKU que ya existe
+      entra y sale con movimientos del kardex (POST /movimientos-inventario/),
+      para no pisar lo que las ventas descontaron mientras el formulario
+      estaba abierto.
 
     Por esa exclusión, el ejemplo muestra una fila existente y omite stock.
     """
@@ -259,7 +251,8 @@ class SkuDetailUpdate(SkuDetailCreate):
     def validate_stock_solo_en_nuevas(self) -> "SkuDetailUpdate":
         if self.id is not None and self.stock is not None:
             raise ValueError(
-                "El stock de un SKU existente no se cambia aquí; usa PATCH /skus/{id}/stock."
+                "El stock de un SKU existente no se cambia aquí; registra un "
+                "movimiento en POST /movimientos-inventario/."
             )
         return self
 
@@ -271,6 +264,7 @@ class SkuDetailUpdate(SkuDetailCreate):
                 "codigo_barras": "8412345678905",
                 "is_visible": True,
                 "precio": {"normal": 29.95, "rebajado": 19.95, "rebaja_hasta": "2026-12-31"},
+                "costo": 12.5,
                 "id": "11111111-1111-4111-8111-111111111111",
             }
         },

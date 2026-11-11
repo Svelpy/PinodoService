@@ -1,0 +1,2237 @@
+[
+ {
+  "ficha": 0,
+  "nombre": "Blusa de lino manga larga",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Blanco",
+    "pixabay_id": 7896704
+   },
+   {
+    "color": "Rosa",
+    "pixabay_id": 3997013
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 1,
+  "nombre": "Blusa satinada cuello V",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Rojo",
+    "pixabay_id": 746675
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 881432
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 2,
+  "nombre": "Blusa de algodón",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Lila",
+    "pixabay_id": 10452876
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 1338993
+   },
+   {
+    "color": "Amarillo",
+    "pixabay_id": 7030878
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 3,
+  "nombre": "Camiseta básica de algodón",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Blanco",
+    "pixabay_id": 7739027
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 8337214
+   },
+   {
+    "color": "Rosa",
+    "pixabay_id": 8337216
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 6130906
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 4,
+  "nombre": "Camiseta oversize estampada",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Blanco",
+    "pixabay_id": 7665088
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 7508618
+   },
+   {
+    "color": "Lila",
+    "pixabay_id": 4953131
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 4953130
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 5,
+  "nombre": "Top de tirantes",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Blanco",
+    "pixabay_id": 10217271
+   },
+   {
+    "color": "Rosa",
+    "pixabay_id": 1498350
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 4721865
+   },
+   {
+    "color": "Verde",
+    "pixabay_id": 1846127
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 6,
+  "nombre": "Jean mom fit",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 3129029
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 1866725
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 7,
+  "nombre": "Jean skinny tiro alto",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 428614
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 1268656
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 5138289
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 8,
+  "nombre": "Jean wide leg",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 2593347
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 1161035
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 698679
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 9,
+  "nombre": "Pantalón sastre recto",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 5185569
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 6486271
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 5173150
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 10,
+  "nombre": "Pantalón palazzo",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Rojo",
+    "pixabay_id": 4785540
+   },
+   {
+    "color": "Verde",
+    "pixabay_id": 5108675
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 4102774
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 5400673
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 4785543
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 11,
+  "nombre": "Pantalón de lino",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Marrón",
+    "pixabay_id": 4104003
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 4102779
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 12,
+  "nombre": "Vestido camisero",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 10452884
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 1538825
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 1373891
+   },
+   {
+    "color": "Amarillo",
+    "pixabay_id": 5304695
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 9179726
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 13,
+  "nombre": "Vestido midi de punto",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 6190499
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 6343718
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 7760316
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 14,
+  "nombre": "Vestido floral",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Rosa",
+    "pixabay_id": 937790
+   },
+   {
+    "color": "Rosa",
+    "pixabay_id": 7146336
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 6599655
+   },
+   {
+    "color": "Amarillo",
+    "pixabay_id": 2274951
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 2119630
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 15,
+  "nombre": "Vestido satinado de tirantes",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 7740679
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 6965303
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 4940550
+   },
+   {
+    "color": "Rosa",
+    "pixabay_id": 5400683
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 16,
+  "nombre": "Vestido largo plisado",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 8086721
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 10338557
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 1736249
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 17,
+  "nombre": "Vestido cruzado",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 7687148
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 7579787
+   },
+   {
+    "color": "Verde",
+    "pixabay_id": 3870457
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 10338553
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 18,
+  "nombre": "Falda denim",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 7501199
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 8046206
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 19,
+  "nombre": "Falda tableada",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 1470613
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 10378587
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 5173124
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 4178646
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 20,
+  "nombre": "Falda de cuero sintético",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 4813610
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 4663772
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 21,
+  "nombre": "Falda midi satinada",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Marrón",
+    "pixabay_id": 4757236
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 7353823
+   },
+   {
+    "color": "Rosa",
+    "pixabay_id": 6403210
+   },
+   {
+    "color": "Verde",
+    "pixabay_id": 8046200
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 22,
+  "nombre": "Falda plisada larga",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Rosa",
+    "pixabay_id": 4757226
+   },
+   {
+    "color": "Verde",
+    "pixabay_id": 8200989
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 1986877
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 23,
+  "nombre": "Falda larga de lino",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Marrón",
+    "pixabay_id": 8046175
+   },
+   {
+    "color": "Amarillo",
+    "pixabay_id": 5304133
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 4757234
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 24,
+  "nombre": "Chaqueta denim",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 2564660
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 25,
+  "nombre": "Blazer oversize",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 2561703
+   },
+   {
+    "color": "Rosa",
+    "pixabay_id": 8676460
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 6486278
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 26,
+  "nombre": "Chaqueta de cuero sintético",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 2721865
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 996870
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 6773269
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 7970153
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 27,
+  "nombre": "Abrigo de paño",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 635271
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 2573319
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 3564548
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 28,
+  "nombre": "Abrigo largo",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 6352261
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 6863307
+   },
+   {
+    "color": "Rosa",
+    "pixabay_id": 977395
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 3190854
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 29,
+  "nombre": "Abrigo acolchado largo",
+  "seccion": "Mujer",
+  "fotos": [
+   {
+    "color": "Verde",
+    "pixabay_id": 3190849
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 6657212
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 30,
+  "nombre": "Camisa Oxford",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Blanco",
+    "pixabay_id": 3740340
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 114607
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 31,
+  "nombre": "Camisa slim de popelina",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Blanco",
+    "pixabay_id": 4792226
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 2604729
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 32,
+  "nombre": "Camisa de vestir a rayas",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 3961872
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 499208
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 33,
+  "nombre": "Camisa de lino",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Blanco",
+    "pixabay_id": 1867471
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 4792223
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 410328
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 34,
+  "nombre": "Camisa de franela a cuadros",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 7566116
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 2590419
+   },
+   {
+    "color": "Verde",
+    "pixabay_id": 4886221
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 35,
+  "nombre": "Camisa denim",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 7333172
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 10520003
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 36,
+  "nombre": "Camiseta cuello redondo",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Blanco",
+    "pixabay_id": 2619788
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 4056729
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 197091
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 1623542
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 37,
+  "nombre": "Camiseta cuello V",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 1886001
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 7495561
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 38,
+  "nombre": "Camiseta de manga larga",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Blanco",
+    "pixabay_id": 1596355
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 39,
+  "nombre": "Polo piqué",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Verde",
+    "pixabay_id": 1851571
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 40,
+  "nombre": "Polo deportivo",
+  "seccion": "Hombre",
+  "fotos": [],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 41,
+  "nombre": "Polo de algodón",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 2942919
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 42,
+  "nombre": "Jean slim",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 3128354
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 164983
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 3737415
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 43,
+  "nombre": "Jean regular",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 4895573
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 1583534
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 5394561
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 1237046
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 44,
+  "nombre": "Jean straight",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 286666
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 45,
+  "nombre": "Chino slim",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 3740366
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 2394718
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 46,
+  "nombre": "Chino regular",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Gris",
+    "pixabay_id": 3740348
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 47,
+  "nombre": "Pantalón casual",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Gris",
+    "pixabay_id": 2604730
+   },
+   {
+    "color": "Verde",
+    "pixabay_id": 564061
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 48,
+  "nombre": "Hoodie básico",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 7141193
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 1171625
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 49,
+  "nombre": "Hoodie con cierre",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 1869825
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 5575050
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 50,
+  "nombre": "Hoodie estampado",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 7103681
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 2568524
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 51,
+  "nombre": "Sudadera cuello redondo",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 4261521
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 4042478
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 52,
+  "nombre": "Sudadera oversize",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Gris",
+    "pixabay_id": 3183680
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 4644153
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 53,
+  "nombre": "Sudadera de felpa",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Gris",
+    "pixabay_id": 3737417
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 10544993
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 54,
+  "nombre": "Chaqueta bomber",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 1866572
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 2770
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 55,
+  "nombre": "Chaqueta denim",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 3587276
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 56,
+  "nombre": "Cazadora de cuero sintético",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 3424455
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 1160204
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 57,
+  "nombre": "Parka con capucha",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 947395
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 58,
+  "nombre": "Parka acolchada",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 2423516
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 59,
+  "nombre": "Parka impermeable",
+  "seccion": "Hombre",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 5437547
+   },
+   {
+    "color": "Amarillo",
+    "pixabay_id": 1851312
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 60,
+  "nombre": "Zapatilla blanca de cuero",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Blanco",
+    "pixabay_id": 2465915
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 1772074
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 590516
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 61,
+  "nombre": "Zapatilla de lona",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 3538422
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 2803385
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 5226091
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 349254
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 4973973
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 2406548
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 62,
+  "nombre": "Zapatilla de caña alta",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 3394175
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 3511527
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 792074
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 63,
+  "nombre": "Zapatilla running",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 115149
+   },
+   {
+    "color": "Rosa",
+    "pixabay_id": 371624
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 2768733
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 346986
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 64,
+  "nombre": "Zapatilla de entrenamiento",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 371625
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 1011596
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 4161647
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 65,
+  "nombre": "Zapatilla de básquet",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 5408643
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 5578127
+   },
+   {
+    "color": "Amarillo",
+    "pixabay_id": 3714730
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 66,
+  "nombre": "Botín Chelsea",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Marrón",
+    "pixabay_id": 889816
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 3999844
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 67,
+  "nombre": "Botín de tacón",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 2270860
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 1869461
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 2788691
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 947896
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 68,
+  "nombre": "Bota de montaña",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 220499
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 3642025
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 69,
+  "nombre": "Bota alta de caña",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 257104
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 7509536
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 70,
+  "nombre": "Bota de lluvia",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Rosa",
+    "pixabay_id": 791893
+   },
+   {
+    "color": "Verde",
+    "pixabay_id": 2867849
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 4908261
+   },
+   {
+    "color": "Amarillo",
+    "pixabay_id": 4169659
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 314411
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 71,
+  "nombre": "Bota vaquera",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Marrón",
+    "pixabay_id": 3049012
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 974927
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 2451703
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 72,
+  "nombre": "Zapato Oxford",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 2661198
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 961651
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 73,
+  "nombre": "Zapato Derby",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Marrón",
+    "pixabay_id": 4898685
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 74,
+  "nombre": "Zapato de charol",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Rojo",
+    "pixabay_id": 649690
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 2661249
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 75,
+  "nombre": "Mocasín de cuero",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Marrón",
+    "pixabay_id": 6079036
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 107400
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 332197
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 76,
+  "nombre": "Mocasín con borlas",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Marrón",
+    "pixabay_id": 3458280
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 8459401
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 77,
+  "nombre": "Zapato náutico",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Marrón",
+    "pixabay_id": 505341
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 78,
+  "nombre": "Stiletto",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 447866
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 589195
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 843848
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 1476312
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 79,
+  "nombre": "Tacón bloque",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 5059032
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 361406
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 1327020
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 80,
+  "nombre": "Zapato salón",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 211424
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 4360460
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 843849
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 3819906
+   },
+   {
+    "color": "Rosa",
+    "pixabay_id": 3688891
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 81,
+  "nombre": "Sandalia de tiras con tacón",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 7387889
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 20145
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 82,
+  "nombre": "Sandalia de plataforma",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Marrón",
+    "pixabay_id": 879302
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 7387888
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 83,
+  "nombre": "Sandalia de tacón fino",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 5058995
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 7387885
+   },
+   {
+    "color": "Amarillo",
+    "pixabay_id": 498501
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 84,
+  "nombre": "Sandalia plana de cuero",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Marrón",
+    "pixabay_id": 2229697
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 85,
+  "nombre": "Sandalia de tiras",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Blanco",
+    "pixabay_id": 932756
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 3710178
+   },
+   {
+    "color": "Rosa",
+    "pixabay_id": 192817
+   },
+   {
+    "color": "Amarillo",
+    "pixabay_id": 538245
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 86,
+  "nombre": "Sandalia deportiva",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 2573355
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 1407755
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 87,
+  "nombre": "Chancla de playa",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Rojo",
+    "pixabay_id": 4656019
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 1088977
+   },
+   {
+    "color": "Rosa",
+    "pixabay_id": 6570481
+   },
+   {
+    "color": "Amarillo",
+    "pixabay_id": 422548
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 186437
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 88,
+  "nombre": "Chancla slide",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Rojo",
+    "pixabay_id": 237492
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 10415858
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 89,
+  "nombre": "Chancla estampada",
+  "seccion": "Calzado",
+  "fotos": [
+   {
+    "color": "Rosa",
+    "pixabay_id": 349224
+   },
+   {
+    "color": "Verde",
+    "pixabay_id": 323455
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 349609
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 90,
+  "nombre": "Cartera bandolera",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Rojo",
+    "pixabay_id": 883110
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 2661412
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 2472100
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 444171
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 2728000
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 91,
+  "nombre": "Cartera tote",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Rojo",
+    "pixabay_id": 2356179
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 1854148
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 92,
+  "nombre": "Clutch",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Rojo",
+    "pixabay_id": 2378449
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 498683
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 1052370
+   },
+   {
+    "color": "Rosa",
+    "pixabay_id": 1630854
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 5095712
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 93,
+  "nombre": "Mochila urbana",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 1839691
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 2794246
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 94,
+  "nombre": "Mochila de cuero",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Marrón",
+    "pixabay_id": 2717331
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 1742880
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 95,
+  "nombre": "Mochila deportiva",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 774720
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 3369137
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 96,
+  "nombre": "Cinturón clásico de cuero",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 358002
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 952834
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 97,
+  "nombre": "Cinturón de vestir",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 3605017
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 210449
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 139757
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 98,
+  "nombre": "Cinturón de tela casual",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 21226
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 3098039
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 210447
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 99,
+  "nombre": "Cinturón de lona",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Verde",
+    "pixabay_id": 91321
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 100,
+  "nombre": "Gorra béisbol",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 5564442
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 102436
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 2525910
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 9627845
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 1867319
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 101,
+  "nombre": "Gorra snapback",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 3375880
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 2591064
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 1260287
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 102,
+  "nombre": "Gorro pescador",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 6722890
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 352227
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 103,
+  "nombre": "Gorro con pompón",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Rojo",
+    "pixabay_id": 1584330
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 93723
+   },
+   {
+    "color": "Rosa",
+    "pixabay_id": 6602017
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 60342
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 104,
+  "nombre": "Gorro beanie",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 7864123
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 415017
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 2591388
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 105,
+  "nombre": "Gorro trenzado",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Rojo",
+    "pixabay_id": 3935895
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 2309519
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 106,
+  "nombre": "Bufanda de lana",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 3118632
+   },
+   {
+    "color": "Marrón",
+    "pixabay_id": 4783123
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 996467
+   },
+   {
+    "color": "Rojo",
+    "pixabay_id": 3236013
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 107,
+  "nombre": "Bufanda tejida gruesa",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Gris",
+    "pixabay_id": 2940655
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 1919150
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 108,
+  "nombre": "Pañuelo de seda estampado",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Rojo",
+    "pixabay_id": 4556229
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 845134
+   },
+   {
+    "color": "Rosa",
+    "pixabay_id": 493043
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 109,
+  "nombre": "Pañuelo de algodón",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Rojo",
+    "pixabay_id": 826876
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 3481059
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 110,
+  "nombre": "Pack 3 calcetines tobilleros",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Blanco",
+    "pixabay_id": 59641
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 4330279
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 111,
+  "nombre": "Calcetines deportivos",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 715022
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 59638
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 4878984
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 112,
+  "nombre": "Calcetines de algodón",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 1495920
+   },
+   {
+    "color": "Blanco",
+    "pixabay_id": 7583045
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 113,
+  "nombre": "Calcetines estampados",
+  "seccion": "Accesorios",
+  "fotos": [
+   {
+    "color": "Rosa",
+    "pixabay_id": 2207776
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 2207777
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 114,
+  "nombre": "Chaqueta acolchada temporada anterior",
+  "seccion": "Outlet",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 2584298
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 1869831
+   },
+   {
+    "color": "Verde",
+    "pixabay_id": 1869830
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 115,
+  "nombre": "Vestido de punto liquidación",
+  "seccion": "Outlet",
+  "fotos": [
+   {
+    "color": "Rojo",
+    "pixabay_id": 2359668
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 10538161
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 4640633
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 116,
+  "nombre": "Jean recto última talla",
+  "seccion": "Outlet",
+  "fotos": [
+   {
+    "color": "Azul",
+    "pixabay_id": 2847257
+   },
+   {
+    "color": "Azul",
+    "pixabay_id": 2394391
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 117,
+  "nombre": "Camisa de lino última talla",
+  "seccion": "Outlet",
+  "fotos": [
+   {
+    "color": "Blanco",
+    "pixabay_id": 3592608
+   }
+  ],
+  "primera_ronda": false
+ },
+ {
+  "ficha": 118,
+  "nombre": "Sudadera estampada colección pasada",
+  "seccion": "Outlet",
+  "fotos": [
+   {
+    "color": "Negro",
+    "pixabay_id": 2182849
+   },
+   {
+    "color": "Gris",
+    "pixabay_id": 8592363
+   }
+  ],
+  "primera_ronda": true
+ },
+ {
+  "ficha": 119,
+  "nombre": "Parka colección pasada",
+  "seccion": "Outlet",
+  "fotos": [
+   {
+    "color": "Verde",
+    "pixabay_id": 5904388
+   },
+   {
+    "color": "Negro",
+    "pixabay_id": 3318114
+   }
+  ],
+  "primera_ronda": false
+ }
+]

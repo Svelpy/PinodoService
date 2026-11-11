@@ -18,8 +18,8 @@ from app.domains.ventas.models import Venta
 from app.domains.ventas.routes import router
 from app.domains.ventas.services import VentaService
 from app.middlewares.exception_handlers import register_exception_handlers
-from app.shared.enums import EstadoVenta, Role
-from app.shared.schemas.pagination import PaginatedResponse
+from app.domains.ventas.schemas import VentaPaginatedResponse, VentaResumen, VentaResumenConfirmada
+from app.shared.enums import EstadoVenta, MetodoPago, Role
 
 
 def _venta() -> Venta:
@@ -109,16 +109,34 @@ def test_list_pasa_filtros_y_actor(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
     client, current_user, db_session = route_context
-    page = PaginatedResponse(total=1, page=1, per_page=20, total_pages=1, data=[_venta()])
+    cero = Decimal("0")
+    page = VentaPaginatedResponse(
+        total=1,
+        page=1,
+        per_page=20,
+        total_pages=1,
+        data=[_venta()],
+        resumen=VentaResumen(
+            confirmada=VentaResumenConfirmada(efectivo=cero, qr=cero, transferencia=cero, total=cero),
+            pendiente=Decimal("39.90"),
+            pendiente_pagado=cero,
+            cancelada=cero,
+        ),
+    )
 
     with patch.object(VentaService, "list", new=AsyncMock(return_value=page)) as service:
-        response = client.get("/ventas/?estado=PENDIENTE&desde=2026-11-01&hasta=2026-11-07")
+        response = client.get("/ventas/?estado=PENDIENTE&metodo_pago=QR&desde=2026-11-01&hasta=2026-11-07")
 
     assert response.status_code == 200
-    assert "items" not in response.json()["data"][0]
+    body = response.json()
+    assert "items" not in body["data"][0]
+    assert "pagos" not in body["data"][0]
+    assert body["data"][0]["total_pagado"] == 0
+    assert body["resumen"]["pendiente"] == 39.9
     assert service.await_args.args[:2] == (db_session, current_user)
     kwargs = service.await_args.kwargs
     assert kwargs["estado"] == EstadoVenta.PENDIENTE
+    assert kwargs["metodo_pago"] == MetodoPago.QR
     assert kwargs["desde"] == date(2026, 11, 1)
     assert kwargs["hasta"] == date(2026, 11, 7)
 
@@ -134,6 +152,7 @@ def test_get_carga_el_detail_con_el_actor(
 
     assert response.status_code == 200
     assert len(response.json()["items"]) == 1
+    assert response.json()["pagos"] == []
     service.assert_awaited_once_with(db_session, venta.id, current_user, load_detail=True)
 
 
@@ -149,11 +168,11 @@ def test_cajero_no_tiene_auditoria(
     service.assert_not_awaited()
 
 
-def test_admin_consulta_auditoria(
+def test_superadmin_consulta_auditoria(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
     client, current_user, _ = route_context
-    current_user.rol = Role.ADMIN
+    current_user.rol = Role.SUPERADMIN
     venta = _venta()
     venta.updated_by = uuid4()
 
@@ -176,13 +195,13 @@ def test_put_items_llama_al_service(
     with patch.object(VentaService, "replace_items", new=AsyncMock(return_value=venta)) as service:
         response = client.put(
             f"/ventas/{venta.id}/items",
-            json={"metodo_pago": "QR", "items": [{"sku_id": str(uuid4()), "cantidad": 1}]},
+            json={"canal": "TIENDA", "items": [{"sku_id": str(uuid4()), "cantidad": 1}]},
         )
 
     assert response.status_code == 200
     args = service.await_args.args
     assert args[:2] == (db_session, venta.id)
-    assert args[2].model_dump(exclude_unset=True).keys() == {"metodo_pago", "items"}
+    assert args[2].model_dump(exclude_unset=True).keys() == {"canal", "items"}
     assert args[3] == current_user
 
 

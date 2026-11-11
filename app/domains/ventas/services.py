@@ -11,11 +11,15 @@ from app.core.base_model import utc_now
 from app.core.config import Settings
 from app.core.logging import get_logger
 from app.domains.auth.schemas import CurrentUser
+from app.domains.movimientos_inventario.services import MovimientoInventarioService
 from app.domains.skus.schemas import SkuPrecio
 from app.domains.skus.services import SkuService
 from app.domains.venta_items.models import VentaItem
 from app.domains.venta_items.repositories import SkuParaVenta, VentaItemRepository
 from app.domains.venta_items.schemas import VentaItemCreate
+from app.domains.venta_pagos.models import VentaPago
+from app.domains.venta_pagos.repositories import VentaPagoRepository
+from app.domains.venta_pagos.schemas import VentaPagoDetailCreate
 from app.domains.ventas.models import Venta
 from app.domains.ventas.repositories import VentaRepository, VentaScope
 from app.domains.ventas.schemas import (
@@ -26,7 +30,7 @@ from app.domains.ventas.schemas import (
     VentaResumen,
     VentaResumenConfirmada,
 )
-from app.shared.enums import Action, CanalVenta, EstadoVenta, MetodoPago, Module
+from app.shared.enums import Action, CanalVenta, EstadoVenta, MetodoPago, Module, TipoMovimiento
 from app.shared.errors.codes import ErrorCode
 from app.shared.errors.exceptions import AppException
 from app.shared.services.permissions import (
@@ -46,7 +50,11 @@ class VentaService:
     - Los precios y el snapshot de cada ítem se toman del SKU al crear la venta
       y se rehacen en cada PUT /items.
     - El stock se descuenta al confirmar (o al crear la venta ya confirmada) y
-      se devuelve al anular una venta confirmada.
+      se devuelve al anular una venta confirmada, siempre con movimientos del
+      kardex. Al confirmar, cada ítem copia el costo promedio de su SKU.
+    - Los pagos nunca superan el total, y confirmar exige que lo cubran
+      exactamente (no hay fiado). Un pago no se anula: cancelar la venta
+      devuelve todos sus pagos y total_pagado queda como lo devuelto.
     - Una venta nunca se elimina: se cancela.
     """
 
@@ -160,13 +168,18 @@ class VentaService:
             hasta=hasta_at,
         )
         # El resumen cubre todo el rango filtrado, no solo la página actual.
-        sumas = await repository.sum_total_by_estado_and_metodo_pago(
-            scope=scope,
-            canal=canal,
-            created_by=created_by,
-            numero=numero,
-            desde=desde_at,
-            hasta=hasta_at,
+        filtros_resumen = {
+            "scope": scope,
+            "canal": canal,
+            "created_by": created_by,
+            "numero": numero,
+            "desde": desde_at,
+            "hasta": hasta_at,
+        }
+        totales = await repository.sum_totales_by_estado(**filtros_resumen)
+        pagos_confirmadas = await repository.sum_pagos_by_metodo(
+            estado=EstadoVenta.CONFIRMADA,
+            **filtros_resumen,
         )
         return VentaPaginatedResponse(
             total=total,
@@ -174,30 +187,32 @@ class VentaService:
             per_page=per_page,
             total_pages=(total + per_page - 1) // per_page,
             data=ventas,
-            resumen=cls._resumen(sumas),
+            resumen=cls._resumen(totales, pagos_confirmadas),
         )
 
     @staticmethod
-    def _resumen(sumas: dict[tuple[EstadoVenta, MetodoPago], Decimal]) -> VentaResumen:
-        def suma(estado: EstadoVenta, metodo_pago: MetodoPago | None = None) -> Decimal:
-            return sum(
-                (
-                    valor
-                    for (estado_venta, metodo), valor in sumas.items()
-                    if estado_venta == estado and (metodo_pago is None or metodo == metodo_pago)
-                ),
-                Decimal("0"),
-            )
+    def _resumen(
+        totales: dict[EstadoVenta, tuple[Decimal, Decimal]],
+        pagos_confirmadas: dict[MetodoPago, Decimal],
+    ) -> VentaResumen:
+        cero = Decimal("0")
+
+        def total(estado: EstadoVenta) -> Decimal:
+            return totales.get(estado, (cero, cero))[0]
+
+        def pagado(estado: EstadoVenta) -> Decimal:
+            return totales.get(estado, (cero, cero))[1]
 
         return VentaResumen(
             confirmada=VentaResumenConfirmada(
-                efectivo=suma(EstadoVenta.CONFIRMADA, MetodoPago.EFECTIVO),
-                qr=suma(EstadoVenta.CONFIRMADA, MetodoPago.QR),
-                transferencia=suma(EstadoVenta.CONFIRMADA, MetodoPago.TRANSFERENCIA),
-                total=suma(EstadoVenta.CONFIRMADA),
+                efectivo=pagos_confirmadas.get(MetodoPago.EFECTIVO, cero),
+                qr=pagos_confirmadas.get(MetodoPago.QR, cero),
+                transferencia=pagos_confirmadas.get(MetodoPago.TRANSFERENCIA, cero),
+                total=total(EstadoVenta.CONFIRMADA),
             ),
-            pendiente=suma(EstadoVenta.PENDIENTE),
-            cancelada=suma(EstadoVenta.CANCELADA),
+            pendiente=total(EstadoVenta.PENDIENTE),
+            pendiente_pagado=pagado(EstadoVenta.PENDIENTE),
+            cancelada=total(EstadoVenta.CANCELADA),
         )
 
     # ------------------------------------------------------------------ ítems
@@ -318,42 +333,144 @@ class VentaService:
             )
         venta.total = venta.subtotal - venta.descuento
 
+    # ------------------------------------------------------------------ pagos
+
+    @classmethod
+    def agregar_pagos(
+        cls,
+        db_session: AsyncSession,
+        venta: Venta,
+        pagos: Sequence[VentaPagoDetailCreate],
+        actor: CurrentUser,
+        now: datetime,
+        *,
+        field_name: str = "pagos",
+    ) -> list[VentaPago]:
+        """
+        Registra pagos de la venta y los suma a total_pagado. Entre todos no
+        pueden superar el saldo por cobrar. No hace commit.
+        """
+        if not pagos:
+            return []
+        monto = sum((pago.monto for pago in pagos), Decimal("0"))
+        saldo = venta.total - venta.total_pagado
+        if monto > saldo:
+            raise cls._conflict(
+                f"Los pagos ({monto}) superan el saldo por cobrar de la venta ({max(saldo, Decimal('0'))}).",
+                field_name,
+            )
+
+        repository = VentaPagoRepository(db_session)
+        nuevos: list[VentaPago] = []
+        for posicion, data in enumerate(pagos):
+            # Igual que los ítems: un microsegundo por posición conserva el orden enviado.
+            created_at = now + timedelta(microseconds=posicion)
+            pago = VentaPago(
+                venta_id=venta.id,
+                created_at=created_at,
+                created_by=actor.id,
+                updated_at=created_at,
+                updated_by=actor.id,
+                # Solo los campos del pago: un VentaPagoCreate también trae venta_id.
+                **data.model_dump(include=set(VentaPagoDetailCreate.model_fields)),
+            )
+            repository.add(pago)
+            nuevos.append(pago)
+        venta.total_pagado += monto
+        return nuevos
+
+    @classmethod
+    def _validar_pagado_hasta_total(cls, venta: Venta) -> None:
+        """Un pago no se anula: el total de la venta no puede bajar de lo ya pagado."""
+        if venta.total < venta.total_pagado:
+            raise cls._conflict(
+                f"El nuevo total de la venta ({venta.total}) es menor que lo ya pagado "
+                f"({venta.total_pagado}). Un pago no se anula: mantén el total o cancela la venta.",
+                "items",
+            )
+
+    @classmethod
+    def _exigir_pagada(cls, venta: Venta) -> None:
+        """Sin fiado: una venta solo se confirma pagada completa."""
+        if venta.total_pagado < venta.total:
+            raise cls._conflict(
+                f"Falta cobrar {venta.total - venta.total_pagado}: los pagos "
+                f"({venta.total_pagado}) no cubren el total de la venta ({venta.total}).",
+                "pagos",
+            )
+
     # ------------------------------------------------------------------ stock
 
     @classmethod
     def _descontar_stock(
         cls,
+        db_session: AsyncSession,
+        venta: Venta,
+        items: Sequence[VentaItem],
         skus: dict[UUID, SkuParaVenta],
-        cantidades: dict[UUID, int],
         actor_id: UUID,
         now: datetime,
     ) -> None:
-        """Descuenta el stock de todos los SKUs, o de ninguno si alguno no alcanza."""
+        """
+        Descuenta el stock de todos los SKUs, o de ninguno si alguno no alcanza.
+        Cada salida queda en el kardex como un movimiento VENTA, y el ítem
+        guarda el costo promedio del SKU en ese momento.
+        """
         faltantes = []
-        for sku_id, cantidad in cantidades.items():
-            sku_venta = skus[sku_id]
+        for item in items:
+            sku_venta = skus[item.sku_id]
             disponible = int(sku_venta.sku.stock.get("cantidad", 0))
-            if disponible < cantidad:
+            if disponible < item.cantidad:
                 faltantes.append(
                     f"{sku_venta.producto_nombre} {sku_venta.color_nombre} "
-                    f"{sku_venta.talla_etiqueta} (disponible {disponible}, pedido {cantidad})"
+                    f"{sku_venta.talla_etiqueta} (disponible {disponible}, pedido {item.cantidad})"
                 )
         if faltantes:
             raise cls._conflict(f"Stock insuficiente: {'; '.join(faltantes)}.", "items")
 
-        for sku_id, cantidad in cantidades.items():
-            cls._mover_stock(skus[sku_id], -cantidad, actor_id, now)
+        for item in items:
+            movimiento = MovimientoInventarioService.registrar(
+                db_session,
+                skus[item.sku_id].sku,
+                TipoMovimiento.VENTA,
+                -item.cantidad,
+                actor_id,
+                now,
+                motivo="Venta confirmada",
+                venta_id=venta.id,
+                field_name="items",
+            )
+            item.costo_unitario = movimiento.costo_unitario
 
     @staticmethod
-    def _mover_stock(sku_venta: SkuParaVenta, delta: int, actor_id: UUID, now: datetime) -> None:
-        sku = sku_venta.sku
-        sku.stock = {
-            **sku.stock,
-            "cantidad": int(sku.stock.get("cantidad", 0)) + delta,
-            "actualizado": now.isoformat(),
-        }
-        sku.updated_at = now
-        sku.updated_by = actor_id
+    def _devolver_stock(
+        db_session: AsyncSession,
+        venta: Venta,
+        items: Sequence[VentaItem],
+        skus: dict[UUID, SkuParaVenta],
+        actor_id: UUID,
+        now: datetime,
+    ) -> None:
+        """
+        Devuelve el stock de una venta anulada a los SKUs que siguen activos
+        (los eliminados se omiten), con un movimiento ANULACION al costo con
+        que salió cada ítem.
+        """
+        for item in items:
+            sku_venta = skus.get(item.sku_id)
+            if sku_venta is None:
+                continue
+            MovimientoInventarioService.registrar(
+                db_session,
+                sku_venta.sku,
+                TipoMovimiento.ANULACION,
+                item.cantidad,
+                actor_id,
+                now,
+                costo_unitario=item.costo_unitario,
+                motivo="Venta anulada",
+                venta_id=venta.id,
+            )
 
     # ------------------------------------------------------------------ escritura
 
@@ -372,8 +489,9 @@ class VentaService:
         settings: Settings,
     ) -> Venta:
         """
-        Crea la venta con sus ítems. Si llega CONFIRMADA (venta de mostrador),
-        descuenta el stock en la misma transacción.
+        Crea la venta con sus ítems y sus pagos. Si llega CONFIRMADA (venta de
+        mostrador), los pagos deben cubrir el total y descuenta el stock en la
+        misma transacción. Si llega PENDIENTE, los pagos son anticipos.
         """
         confirmar = data.estado == EstadoVenta.CONFIRMADA
         sku_ids = [item.sku_id for item in data.items]
@@ -382,7 +500,7 @@ class VentaService:
         now = utc_now()
 
         venta = Venta(
-            **data.model_dump(exclude={"items"}),
+            **data.model_dump(exclude={"items", "pagos"}),
             created_by=actor.id,
             updated_by=actor.id,
         )
@@ -391,8 +509,10 @@ class VentaService:
             for posicion, item in enumerate(data.items)
         ]
         cls._aplicar_totales(venta, [item.subtotal for item in items])
+        pagos = cls.agregar_pagos(db_session, venta, data.pagos, actor, now)
         if confirmar:
-            cls._descontar_stock(skus, {item.sku_id: item.cantidad for item in items}, actor.id, now)
+            cls._exigir_pagada(venta)
+            cls._descontar_stock(db_session, venta, items, skus, actor.id, now)
             venta.confirmada_at = now
 
         VentaRepository(db_session).add(venta)
@@ -402,10 +522,11 @@ class VentaService:
         await cls._commit(db_session)
 
         logger.info(
-            "Venta creada: venta_id=%s estado=%s items=%s actor_id=%s",
+            "Venta creada: venta_id=%s estado=%s items=%s pagos=%s actor_id=%s",
             venta.id,
             venta.estado,
             len(items),
+            len(pagos),
             actor.id,
         )
         return await cls._reload(db_session, venta.id, actor)
@@ -454,6 +575,7 @@ class VentaService:
         for field_name, value in datos_venta.items():
             setattr(venta, field_name, value)
         cls._aplicar_totales(venta, subtotales)
+        cls._validar_pagado_hasta_total(venta)
         venta.updated_at = now
         venta.updated_by = actor.id
 
@@ -490,9 +612,11 @@ class VentaService:
         la cobra como una proforma, tal como se ofreció; con recalcular_precios
         antes rehace el snapshot y los precios de cada ítem con su SKU actual,
         igual que PUT /items (conserva cantidades y descuentos), y recalcula
-        los totales. PENDIENTE → CANCELADA no toca el stock; CONFIRMADA
-        → CANCELADA lo devuelve y exige la acción DELETE de ventas (anular una
-        venta cobrada). Cancelar no recalcula nada. CANCELADA es definitiva.
+        los totales. Los pagos enviados se suman a los anticipos y, entre
+        todos, deben cubrir exactamente el total. PENDIENTE → CANCELADA no toca
+        el stock; CONFIRMADA → CANCELADA lo devuelve y exige la acción DELETE
+        de ventas (anular una venta cobrada). Cancelar no recalcula nada ni
+        toca los pagos: se devuelven todos. CANCELADA es definitiva.
         """
         venta = await cls.get(db_session, venta_id, actor, for_update=True, load_detail=True)
         destino = data.estado
@@ -532,7 +656,10 @@ class VentaService:
                     cls._actualizar_item(item, valores, actor, now)
                     subtotales.append(valores["subtotal"])
                 cls._aplicar_totales(venta, subtotales)
-            cls._descontar_stock(skus, cantidades, actor.id, now)
+                cls._validar_pagado_hasta_total(venta)
+            cls.agregar_pagos(db_session, venta, data.pagos, actor, now)
+            cls._exigir_pagada(venta)
+            cls._descontar_stock(db_session, venta, venta.items, skus, actor.id, now)
             venta.confirmada_at = now
         else:
             if venta.estado == EstadoVenta.CONFIRMADA:
@@ -542,10 +669,8 @@ class VentaService:
                         403,
                         ErrorCode.PERMISSION_DENIED,
                     )
-                # El stock vuelve a los SKUs que siguen activos; los eliminados se omiten.
                 skus = await item_repository.get_skus_para_venta(list(cantidades), for_update=True)
-                for sku_id, sku_venta in skus.items():
-                    cls._mover_stock(sku_venta, cantidades[sku_id], actor.id, now)
+                cls._devolver_stock(db_session, venta, venta.items, skus, actor.id, now)
             venta.cancelada_at = now
 
         estado_anterior = venta.estado

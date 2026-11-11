@@ -2,6 +2,10 @@
 Una venta no tiene PATCH ni DELETE. Mientras está PENDIENTE se corrige con
 PUT /ventas/{id}/items, que reemplaza sus ítems y los datos no sensibles; su
 estado cambia con PATCH /ventas/{id}/estado. Una venta no se borra: se cancela.
+
+Se cobra con pagos (venta_pagos): pueden enviarse al crearla, al confirmarla o
+uno a uno con POST /venta-pagos/ mientras está pendiente. Confirmarla exige
+que esté pagada completa.
 """
 
 from datetime import datetime
@@ -11,7 +15,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 from app.domains.venta_items.schemas import VentaItemCreate, VentaItemResponse
-from app.shared.enums import CanalVenta, EstadoVenta, MetodoPago
+from app.domains.venta_pagos.schemas import MAX_PAGOS_POR_VENTA, VentaPagoDetail, VentaPagoDetailCreate
+from app.shared.enums import CanalVenta, EstadoVenta
 from app.shared.schemas.pagination import PaginatedResponse
 from app.shared.services.validators import (
     validator_boolean,
@@ -44,6 +49,12 @@ def _validate_optional_phone(value: object) -> str | None:
     return validator_phone(value)
 
 
+def _validate_pagos_not_null(value: object) -> object:
+    if value is None:
+        raise ValueError("Los pagos no pueden ser null; usa [] si no hay pagos.")
+    return value
+
+
 def _validate_descuento(value: object) -> Decimal:
     if value is None:
         raise ValueError("El descuento no puede ser null; usa 0 si no hay descuento.")
@@ -57,16 +68,19 @@ class VentaCreate(BaseModel):
     estado es PENDIENTE por defecto, como un pedido de WhatsApp que aún no se
     cobra; una venta de mostrador se envía como CONFIRMADA para cobrarla en la
     misma petición. Subtotal y total los calcula el service.
+
+    pagos admite pagos mixtos: si la venta llega CONFIRMADA deben sumar su
+    total; si llega PENDIENTE son anticipos opcionales y no pueden superarlo.
     """
 
     estado: EstadoVenta = Field(default=EstadoVenta.PENDIENTE)
     canal: CanalVenta = Field(default=CanalVenta.WHATSAPP)
-    metodo_pago: MetodoPago = Field(default=MetodoPago.EFECTIVO)
     referencia: str | None = Field(default=None, min_length=1, max_length=150)
     cliente_telefono: str | None = Field(default=None, min_length=6, max_length=20)
     descuento: Decimal = Field(default=Decimal("0"), max_digits=12, decimal_places=2)
     nota: str | None = Field(default=None, min_length=1)
     items: list[VentaItemCreate] = Field(..., min_length=1, max_length=MAX_ITEMS_POR_VENTA)
+    pagos: list[VentaPagoDetailCreate] = Field(default_factory=list, max_length=MAX_PAGOS_POR_VENTA)
 
     @field_validator("estado")
     @classmethod
@@ -82,13 +96,6 @@ class VentaCreate(BaseModel):
     def validate_canal(cls, value: CanalVenta | None) -> CanalVenta:
         if value is None:
             raise ValueError("El canal no puede ser null.")
-        return value
-
-    @field_validator("metodo_pago")
-    @classmethod
-    def validate_metodo_pago(cls, value: MetodoPago | None) -> MetodoPago:
-        if value is None:
-            raise ValueError("El método de pago no puede ser null.")
         return value
 
     @field_validator("referencia", "nota", mode="before")
@@ -118,18 +125,23 @@ class VentaCreate(BaseModel):
     def validate_items(cls, value: list[VentaItemCreate]) -> list[VentaItemCreate]:
         return _validate_items(value)
 
+    @field_validator("pagos", mode="before")
+    @classmethod
+    def validate_pagos_not_null(cls, value: object) -> object:
+        return _validate_pagos_not_null(value)
+
     model_config = ConfigDict(
         extra="forbid",
         json_schema_extra={
             "example": {
                 "estado": "PENDIENTE",
                 "canal": "WHATSAPP",
-                "metodo_pago": "QR",
                 "referencia": "María López",
                 "cliente_telefono": "+59171234567",
                 "descuento": 4.8,
                 "nota": "Recoge en tienda el sábado.",
                 "items": [VentaItemCreate.model_config["json_schema_extra"]["example"]],
+                "pagos": [{"metodo": "QR", "monto": 20, "referencia": "0048213"}],
             }
         },
     )
@@ -142,7 +154,8 @@ class VentaItemsUpdate(BaseModel):
     items reemplaza la lista completa: los SKUs que siguen se actualizan, los
     que faltan se eliminan y los nuevos se crean. Los datos de la venta que se
     omiten no cambian; referencia, cliente_telefono y nota aceptan null para
-    quitarlos. Subtotal y total se recalculan.
+    quitarlos. Subtotal y total se recalculan; el nuevo total no puede quedar
+    por debajo de lo ya pagado.
 
     recalcular_precios, igual que al confirmar: por defecto (false) los ítems que
     ya estaban conservan el precio y los nombres con que se ofrecieron y solo
@@ -151,7 +164,6 @@ class VentaItemsUpdate(BaseModel):
     """
 
     canal: CanalVenta | None = Field(default=None)
-    metodo_pago: MetodoPago | None = Field(default=None)
     referencia: str | None = Field(default=None, min_length=1, max_length=150)
     cliente_telefono: str | None = Field(default=None, min_length=6, max_length=20)
     descuento: Decimal | None = Field(default=None, max_digits=12, decimal_places=2)
@@ -164,13 +176,6 @@ class VentaItemsUpdate(BaseModel):
     def validate_canal(cls, value: CanalVenta | None) -> CanalVenta:
         if value is None:
             raise ValueError("El canal no puede ser null.")
-        return value
-
-    @field_validator("metodo_pago")
-    @classmethod
-    def validate_metodo_pago(cls, value: MetodoPago | None) -> MetodoPago:
-        if value is None:
-            raise ValueError("El método de pago no puede ser null.")
         return value
 
     @field_validator("referencia", "nota", mode="before")
@@ -212,7 +217,6 @@ class VentaItemsUpdate(BaseModel):
         json_schema_extra={
             "example": {
                 "canal": "WHATSAPP",
-                "metodo_pago": "TRANSFERENCIA",
                 "referencia": "María López",
                 "cliente_telefono": "+59171234567",
                 "descuento": 0,
@@ -234,10 +238,14 @@ class VentaEstadoUpdate(BaseModel):
     pendiente se cobra como una proforma: tal como se ofreció, con sus precios,
     descuentos y total. true la actualiza antes de cobrar con los precios y
     nombres del día, igual que recalcular_precios en PUT /items.
+
+    pagos también solo se usa al confirmar: cobra el saldo en la misma
+    petición. Junto con los anticipos deben sumar el total de la venta.
     """
 
     estado: EstadoVenta = Field(...)
     recalcular_precios: bool = Field(default=False)
+    pagos: list[VentaPagoDetailCreate] = Field(default_factory=list, max_length=MAX_PAGOS_POR_VENTA)
 
     @field_validator("estado")
     @classmethod
@@ -255,31 +263,51 @@ class VentaEstadoUpdate(BaseModel):
             raise ValueError("recalcular_precios no puede ser null.")
         return validator_boolean(value)
 
+    @field_validator("pagos", mode="before")
+    @classmethod
+    def validate_pagos_not_null(cls, value: object) -> object:
+        return _validate_pagos_not_null(value)
+
     @model_validator(mode="after")
-    def validate_recalcular_solo_al_confirmar(self) -> "VentaEstadoUpdate":
-        if "recalcular_precios" in self.model_fields_set and self.estado != EstadoVenta.CONFIRMADA:
-            raise ValueError("recalcular_precios solo se envía al confirmar la venta.")
+    def validate_solo_al_confirmar(self) -> "VentaEstadoUpdate":
+        if self.estado != EstadoVenta.CONFIRMADA:
+            for field_name in ("recalcular_precios", "pagos"):
+                if field_name in self.model_fields_set:
+                    raise ValueError(f"{field_name} solo se envía al confirmar la venta.")
         return self
 
     model_config = ConfigDict(
         extra="forbid",
-        json_schema_extra={"example": {"estado": "CONFIRMADA", "recalcular_precios": True}},
+        json_schema_extra={
+            "example": {
+                "estado": "CONFIRMADA",
+                "recalcular_precios": True,
+                "pagos": [
+                    {"metodo": "EFECTIVO", "monto": 40},
+                    {"metodo": "QR", "monto": 20, "referencia": "0048219"},
+                ],
+            }
+        },
     )
 
 
 class VentaResponse(BaseModel):
-    """created_by es quien registró la venta: es un dato de negocio, no solo de auditoría."""
+    """
+    created_by es quien registró la venta: es un dato de negocio, no solo de
+    auditoría. total_pagado es la suma de sus pagos; el saldo por cobrar es
+    total - total_pagado. En una venta cancelada es lo que se devolvió.
+    """
 
     id: UUID
     numero: int
     estado: EstadoVenta
     canal: CanalVenta
-    metodo_pago: MetodoPago
     referencia: str | None
     cliente_telefono: str | None
     subtotal: Decimal
     descuento: Decimal
     total: Decimal
+    total_pagado: Decimal
     nota: str | None
     confirmada_at: datetime | None
     cancelada_at: datetime | None
@@ -287,7 +315,7 @@ class VentaResponse(BaseModel):
     created_by: UUID | None
     updated_at: datetime
 
-    @field_serializer("subtotal", "descuento", "total", when_used="json")
+    @field_serializer("subtotal", "descuento", "total", "total_pagado", when_used="json")
     def serialize_money(self, value: Decimal) -> float:
         # Igual que los precios de los SKUs: la API expone los importes como números JSON.
         return float(value)
@@ -300,12 +328,12 @@ class VentaResponse(BaseModel):
                 "numero": 1,
                 "estado": "CANCELADA",
                 "canal": "WHATSAPP",
-                "metodo_pago": "QR",
                 "referencia": "María López",
                 "cliente_telefono": "+59171234567",
                 "subtotal": 84.8,
                 "descuento": 4.8,
                 "total": 80,
+                "total_pagado": 80,
                 "nota": "Recoge en tienda el sábado.",
                 "confirmada_at": "2026-11-07T15:00:00Z",
                 "cancelada_at": "2026-11-08T10:00:00Z",
@@ -318,7 +346,10 @@ class VentaResponse(BaseModel):
 
 
 class VentaResumenConfirmada(BaseModel):
-    """Ventas confirmadas por método de pago; total es la suma de los tres."""
+    """
+    Ventas confirmadas: lo cobrado con cada método, sumando sus pagos (una venta
+    con pagos mixtos aporta a varios), y total, la suma de los tres.
+    """
 
     efectivo: Decimal
     qr: Decimal
@@ -334,13 +365,15 @@ class VentaResumen(BaseModel):
     """
     Suma de total de todas las ventas filtradas, no solo de la página. Ignora
     los filtros estado y metodo_pago para mostrar siempre el desglose completo.
+    pendiente_pagado son los anticipos ya recibidos de las ventas pendientes.
     """
 
     confirmada: VentaResumenConfirmada
     pendiente: Decimal
+    pendiente_pagado: Decimal
     cancelada: Decimal
 
-    @field_serializer("pendiente", "cancelada", when_used="json")
+    @field_serializer("pendiente", "pendiente_pagado", "cancelada", when_used="json")
     def serialize_money(self, value: Decimal) -> float:
         return float(value)
 
@@ -349,6 +382,7 @@ class VentaResumen(BaseModel):
             "example": {
                 "confirmada": {"efectivo": 800, "qr": 340, "transferencia": 0, "total": 1140},
                 "pendiente": 160,
+                "pendiente_pagado": 50,
                 "cancelada": 90,
             }
         },
@@ -382,9 +416,13 @@ class VentaResponseAudit(VentaResponse):
 
 
 class VentaDetail(VentaResponse):
-    """Respuesta de GET /ventas/{id}, POST, PUT /items y PATCH /estado: la venta con sus ítems."""
+    """
+    Respuesta de GET /ventas/{id}, POST, PUT /items y PATCH /estado: la venta
+    con sus ítems y sus pagos.
+    """
 
     items: list[VentaItemResponse]
+    pagos: list[VentaPagoDetail]
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -405,6 +443,23 @@ class VentaDetail(VentaResponse):
                         "color_nombre": "Beige",
                         "talla_etiqueta": "42",
                         "codigo_barras": "8412345678912",
+                    },
+                ],
+                "pagos": [
+                    {
+                        **VentaPagoDetail.model_config["json_schema_extra"]["example"],
+                        "monto": 50,
+                    },
+                    {
+                        "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                        "venta_id": "66666666-6666-4666-8666-666666666666",
+                        "metodo": "EFECTIVO",
+                        "monto": 30,
+                        "referencia": "Recibo 0012",
+                        "comprobante_url": "https://res.cloudinary.com/demo/image/upload/v1/pinodo/comprobantes/def456.jpg",
+                        "created_at": "2026-11-07T15:00:00Z",
+                        "created_by": "22222222-2222-4222-8222-222222222222",
+                        "updated_at": "2026-11-07T15:00:00Z",
                     },
                 ],
             }

@@ -227,11 +227,12 @@ def test_patch_stock_pasa_el_actor_y_responde_el_detail(
         "update_stock",
         new=AsyncMock(return_value=SimpleNamespace(**sku.model_dump(), talla=Talla(etiqueta="M"))),
     ) as service:
-        response = client.patch(f"/skus/{sku.id}/stock", json={"ajuste": 3})
+        response = client.patch(f"/skus/{sku.id}/stock", json={"minimo": 3})
 
     assert response.status_code == 200
+    assert "costo" not in response.json()
     assert service.await_args.args[0] is db_session
-    assert service.await_args.args[2].ajuste == 3
+    assert service.await_args.args[2].minimo == 3
     assert service.await_args.args[3] == current_user.id
     assert response.json()["stock"]["cantidad"] == 8
 
@@ -241,12 +242,9 @@ def test_patch_stock_no_acepta_cantidad(
 ) -> None:
     client, _, _ = route_context
 
-    response = client.patch(
-        f"/skus/{uuid4()}/stock",
-        json={"cantidad": 9},
-    )
-
-    assert response.status_code == 422
+    for body in ({"cantidad": 9}, {"ajuste": 3}):
+        response = client.patch(f"/skus/{uuid4()}/stock", json=body)
+        assert response.status_code == 422
 
 
 def test_ya_no_existe_patch_del_sku(
