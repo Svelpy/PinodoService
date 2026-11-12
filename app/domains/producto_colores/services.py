@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.base_model import utc_now
 from app.core.config import Settings
 from app.core.logging import get_logger
+from app.domains.ajustes_inventario.services import CargaInicial
 from app.domains.colores.repositories import ColorRepository
 from app.domains.imagenes.models import Imagen
 from app.domains.imagenes.repositories import ImagenRepository
@@ -261,8 +262,13 @@ class ProductoColorService:
         producto_id: UUID,
         data: ProductoColorDetailCreate,
         actor_id: UUID,
+        carga: CargaInicial | None = None,
     ) -> ProductoColor:
-        """Añade a la sesión el color con sus imágenes y SKUs. No hace commit."""
+        """
+        Añade a la sesión el color con sus imágenes y SKUs. No hace commit. El
+        stock de sus SKUs entra por carga, el documento INICIAL de la petición;
+        si no se recibe, el color crea el suyo.
+        """
         audit = {"created_by": actor_id, "updated_by": actor_id}
         producto_color = ProductoColor(
             producto_id=producto_id,
@@ -278,9 +284,9 @@ class ProductoColorService:
                 Imagen(producto_color_id=producto_color.id, **imagen.model_dump(), **audit)
             )
 
-        now = utc_now()
+        carga = carga or CargaInicial(db_session, actor_id, utc_now())
         for sku in data.skus:
-            SkuService.nuevo(db_session, producto_color.id, sku, actor_id, now)
+            SkuService.nuevo(db_session, producto_color.id, sku, carga)
         return producto_color
 
     @classmethod
@@ -581,9 +587,10 @@ class ProductoColorService:
         changed = eliminados > 0
 
         por_id = {sku.id: sku for sku in actuales}
+        carga = CargaInicial(db_session, actor_id, now)
         for fila in data.skus or []:
             if fila.id is None:
-                SkuService.nuevo(db_session, producto_color_id, fila, actor_id, now)
+                SkuService.nuevo(db_session, producto_color_id, fila, carga)
                 changed = True
                 continue
 

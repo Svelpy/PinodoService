@@ -1,5 +1,6 @@
 """Importa todos los modelos persistentes para registrar su metadata."""
 
+from app.domains.ajustes_inventario.models import AjusteInventario
 from app.domains.auth.models import AuthSession
 from app.domains.categoria_productos.models import CategoriaProducto
 from app.domains.categorias.models import Categoria
@@ -19,6 +20,7 @@ from app.domains.venta_pagos.models import VentaPago
 from app.domains.ventas.models import Venta
 
 __all__ = [
+    "AjusteInventario",
     "AuthSession",
     "Categoria",
     "CategoriaProducto",

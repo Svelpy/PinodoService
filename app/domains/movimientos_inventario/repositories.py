@@ -1,47 +1,66 @@
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import ColumnElement, Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.domains.ajustes_inventario.models import AjusteInventario
+from app.domains.colores.models import Color
 from app.domains.movimientos_inventario.models import MovimientoInventario
+from app.domains.producto_colores.models import ProductoColor
+from app.domains.productos.models import Producto
 from app.domains.skus.models import Sku
-from app.domains.ventas.models import Venta
+from app.domains.tallas.models import Talla
 from app.shared.enums import MotivoAjuste, TipoMovimiento
+
+# Fila del kardex: (movimiento, codigo_barras, producto_id, producto_nombre, color_nombre, talla_etiqueta)
+MovimientoRow = tuple[Any, ...]
 
 
 class MovimientoInventarioRepository:
     """
     Acceso a datos del kardex. Los movimientos solo se agregan: no hay
     operaciones de edición ni de eliminación. No hace commit.
+
+    Las lecturas devuelven cada movimiento con los nombres de su prenda y su
+    documento de origen cargado. Los nombres no filtran eliminados: la
+    historia del kardex se conserva aunque la prenda ya no esté en el catálogo.
     """
 
     def __init__(self, db_session: AsyncSession) -> None:
         self.db_session = db_session
 
     @staticmethod
-    def _with_embebidos(statement: Select) -> Select:
-        """Carga el SKU y la venta del ListItem y el Detail, sin los eliminados."""
-        return statement.options(
-            selectinload(MovimientoInventario.sku.and_(Sku.is_deleted.is_(False))),
-            selectinload(MovimientoInventario.venta.and_(Venta.is_deleted.is_(False))),
+    def _select() -> Select:
+        return (
+            select(
+                MovimientoInventario,
+                Sku.codigo_barras,
+                Producto.id,
+                Producto.nombre,
+                Color.nombre,
+                Talla.etiqueta,
+            )
+            .join(Sku, MovimientoInventario.sku_id == Sku.id)
+            .join(ProductoColor, Sku.producto_color_id == ProductoColor.id)
+            .join(Producto, ProductoColor.producto_id == Producto.id)
+            .join(Color, ProductoColor.color_id == Color.id)
+            .join(Talla, Sku.talla_id == Talla.id)
+            .options(
+                selectinload(MovimientoInventario.ajuste),
+                selectinload(MovimientoInventario.venta),
+            )
+            .where(MovimientoInventario.is_deleted.is_(False))
         )
 
-    async def get_by_id(
-        self,
-        movimiento_id: UUID,
-        *,
-        load_detail: bool = False,
-    ) -> MovimientoInventario | None:
-        statement = select(MovimientoInventario).where(
-            MovimientoInventario.id == movimiento_id,
-            MovimientoInventario.is_deleted.is_(False),
+    async def get_by_id(self, movimiento_id: UUID) -> MovimientoRow | None:
+        result = await self.db_session.execute(
+            self._select().where(MovimientoInventario.id == movimiento_id)
         )
-        if load_detail:
-            statement = self._with_embebidos(statement)
-        result = await self.db_session.execute(statement)
-        return result.scalar_one_or_none()
+        row = result.first()
+        return tuple(row) if row is not None else None
 
     async def find_many(
         self,
@@ -51,14 +70,16 @@ class MovimientoInventarioRepository:
         sku_id: UUID | None = None,
         tipo: TipoMovimiento | None = None,
         motivo: MotivoAjuste | None = None,
+        ajuste_id: UUID | None = None,
         venta_id: UUID | None = None,
         created_by: UUID | None = None,
         desde: datetime | None = None,
         hasta: datetime | None = None,
-    ) -> tuple[list[MovimientoInventario], int]:
+    ) -> tuple[list[MovimientoRow], int]:
         """
-        Listado paginado, del movimiento más reciente al más antiguo, con sus
-        embebidos. desde es inclusivo y hasta exclusivo, sobre created_at.
+        Listado paginado, del movimiento más reciente al más antiguo. desde es
+        inclusivo y hasta exclusivo, sobre created_at. motivo filtra por el
+        motivo del documento de ajuste.
         """
         filters: list[ColumnElement[bool]] = [MovimientoInventario.is_deleted.is_(False)]
         if sku_id is not None:
@@ -66,7 +87,13 @@ class MovimientoInventarioRepository:
         if tipo is not None:
             filters.append(MovimientoInventario.tipo == tipo)
         if motivo is not None:
-            filters.append(MovimientoInventario.motivo == motivo)
+            filters.append(
+                MovimientoInventario.ajuste_id.in_(
+                    select(AjusteInventario.id).where(AjusteInventario.motivo == motivo)
+                )
+            )
+        if ajuste_id is not None:
+            filters.append(MovimientoInventario.ajuste_id == ajuste_id)
         if venta_id is not None:
             filters.append(MovimientoInventario.venta_id == venta_id)
         if created_by is not None:
@@ -82,30 +109,22 @@ class MovimientoInventarioRepository:
         total = int(total_result.scalar_one())
 
         result = await self.db_session.execute(
-            self._with_embebidos(
-                select(MovimientoInventario)
-                .where(*filters)
-                .order_by(MovimientoInventario.created_at.desc(), MovimientoInventario.id.desc())
-                .offset(offset)
-                .limit(limit)
-            )
+            self._select()
+            .where(*filters)
+            .order_by(MovimientoInventario.created_at.desc(), MovimientoInventario.id.desc())
+            .offset(offset)
+            .limit(limit)
         )
-        return list(result.scalars().all()), total
+        return [tuple(row) for row in result.all()], total
 
-    async def list_by_ids(self, movimiento_ids: list[UUID]) -> list[MovimientoInventario]:
-        """Movimientos con sus embebidos, en el orden de movimiento_ids."""
-        if not movimiento_ids:
-            return []
+    async def list_by_ajuste(self, ajuste_id: UUID) -> list[MovimientoRow]:
+        """Líneas de un documento de ajuste, ordenadas por producto, color y talla."""
         result = await self.db_session.execute(
-            self._with_embebidos(
-                select(MovimientoInventario).where(
-                    MovimientoInventario.id.in_(movimiento_ids),
-                    MovimientoInventario.is_deleted.is_(False),
-                )
-            )
+            self._select()
+            .where(MovimientoInventario.ajuste_id == ajuste_id)
+            .order_by(Producto.nombre, Color.nombre, Talla.created_at, Sku.id)
         )
-        por_id = {movimiento.id: movimiento for movimiento in result.scalars().all()}
-        return [por_id[movimiento_id] for movimiento_id in movimiento_ids if movimiento_id in por_id]
+        return [tuple(row) for row in result.all()]
 
     def add(self, movimiento: MovimientoInventario) -> None:
         self.db_session.add(movimiento)

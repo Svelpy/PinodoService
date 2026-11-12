@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.base_model import utc_now
 from app.core.config import Settings, get_settings
 from app.core.logging import get_logger
-from app.domains.movimientos_inventario.services import MovimientoInventarioService
+from app.domains.ajustes_inventario.services import CargaInicial
 from app.domains.producto_colores.repositories import ProductoColorRepository
 from app.domains.skus.models import Sku
 from app.domains.skus.repositories import SkuRepository
@@ -25,7 +25,6 @@ from app.domains.skus.schemas import (
     SkuStockInput,
 )
 from app.domains.tallas.repositories import TallaRepository
-from app.shared.enums import TipoMovimiento
 from app.shared.errors.codes import ErrorCode
 from app.shared.errors.exceptions import AppException
 from app.shared.schemas.pagination import PaginatedResponse
@@ -114,13 +113,12 @@ class SkuService:
         db_session: AsyncSession,
         producto_color_id: UUID,
         data: SkuDetailCreate,
-        actor_id: UUID,
-        now: datetime,
+        carga: CargaInicial,
     ) -> Sku:
         """
         Añade a la sesión un SKU nuevo ya validado. Su stock inicial entra al
-        kardex como un movimiento INICIAL a data.costo, así que el SKU nace con
-        stock 0 y el movimiento lo sube. No hace commit.
+        kardex por el documento INICIAL de la petición (carga), a data.costo:
+        el SKU nace con stock 0 y el movimiento lo sube. No hace commit.
         """
         stock = data.stock or SkuStockInput()
         sku = Sku(
@@ -128,22 +126,14 @@ class SkuService:
             **data.model_dump(include={"talla_id", "codigo_barras", "is_visible", "costo"}),
             precio=cls.precio_json(data.precio),
             stock=cls.stock_json(SkuStockInput(cantidad=0, minimo=stock.minimo)),
-            created_at=now,
-            created_by=actor_id,
-            updated_at=now,
-            updated_by=actor_id,
+            created_at=carga.now,
+            created_by=carga.actor_id,
+            updated_at=carga.now,
+            updated_by=carga.actor_id,
         )
         SkuRepository(db_session).add(sku)
         if stock.cantidad > 0:
-            MovimientoInventarioService.registrar(
-                db_session,
-                sku,
-                TipoMovimiento.INICIAL,
-                stock.cantidad,
-                actor_id,
-                now,
-                costo_unitario=data.costo,
-            )
+            carga.registrar(sku, stock.cantidad, data.costo)
         return sku
 
     @classmethod
@@ -417,7 +407,9 @@ class SkuService:
         if data.codigo_barras is not None:
             await cls.validate_unique_codigo_barras(repository, data.codigo_barras)
 
-        sku = cls.nuevo(db_session, data.producto_color_id, data, actor_id, utc_now())
+        sku = cls.nuevo(
+            db_session, data.producto_color_id, data, CargaInicial(db_session, actor_id, utc_now())
+        )
         await cls._commit(db_session, sku)
 
         logger.info("SKU creado: sku_id=%s actor_id=%s", sku.id, actor_id)

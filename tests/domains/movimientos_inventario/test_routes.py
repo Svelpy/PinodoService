@@ -1,5 +1,4 @@
 from collections.abc import AsyncGenerator, Iterator
-from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -12,35 +11,18 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.domains.auth.dependencies import get_current_principal
 from app.domains.auth.schemas import CurrentUser
-from app.domains.movimientos_inventario.models import MovimientoInventario
 from app.domains.movimientos_inventario.routes import router
-from app.domains.movimientos_inventario.schemas import (
-    AjusteInventarioResultado,
-    MovimientoInventarioListItem,
-    SkuCosto,
-)
+from app.domains.movimientos_inventario.schemas import MovimientoInventarioResponse, SkuCosto
 from app.domains.movimientos_inventario.services import MovimientoInventarioService
 from app.middlewares.exception_handlers import register_exception_handlers
 from app.shared.enums import MotivoAjuste, Role, TipoMovimiento
 from app.shared.schemas.pagination import PaginatedResponse
 
 
-def _movimiento() -> MovimientoInventario:
-    movimiento = MovimientoInventario(
-        sku_id=uuid4(),
-        tipo=TipoMovimiento.AJUSTE,
-        motivo=MotivoAjuste.RECEPCION,
-        cantidad=24,
-        saldo=30,
-        costo_unitario=Decimal("12.50"),
-        costo_promedio=Decimal("12.10"),
-        nota="Lote de noviembre",
-        created_by=uuid4(),
-        updated_by=uuid4(),
+def _movimiento() -> MovimientoInventarioResponse:
+    return MovimientoInventarioResponse.model_validate(
+        MovimientoInventarioResponse.model_config["json_schema_extra"]["example"]
     )
-    movimiento.sku = None
-    movimiento.venta = None
-    return movimiento
 
 
 @pytest.fixture
@@ -65,78 +47,45 @@ def route_context() -> Iterator[tuple[TestClient, CurrentUser, MagicMock]]:
         yield client, current_user, db_session
 
 
-def test_ajuste_pasa_el_actor_y_responde_los_movimientos(
-    route_context: tuple[TestClient, CurrentUser, MagicMock],
-) -> None:
-    client, current_user, db_session = route_context
-    movimiento = _movimiento()
-    resultado = AjusteInventarioResultado(
-        motivo=MotivoAjuste.RECEPCION,
-        movimientos=[MovimientoInventarioListItem.model_validate(movimiento)],
-        sin_diferencia=[],
-    )
-
-    with patch.object(MovimientoInventarioService, "ajustar", new=AsyncMock(return_value=resultado)) as service:
-        response = client.post(
-            "/movimientos-inventario/ajustes",
-            json={
-                "motivo": "RECEPCION",
-                "items": [{"sku_id": str(movimiento.sku_id), "cantidad": 24, "costo_unitario": 12.5}],
-            },
-        )
-
-    assert response.status_code == 201
-    [body] = response.json()["movimientos"]
-    assert (body["motivo"], body["costo_unitario"], body["costo_promedio"]) == ("RECEPCION", 12.5, 12.1)
-    assert body["sku"] is None and body["venta"] is None
-    args = service.await_args.args
-    assert args[0] is db_session
-    assert args[1].items[0].costo_unitario == Decimal("12.5")
-    assert args[2] == current_user.id
-
-
-def test_ajuste_invalido_no_llega_al_service(
-    route_context: tuple[TestClient, CurrentUser, MagicMock],
-) -> None:
-    client, _, _ = route_context
-
-    with patch.object(MovimientoInventarioService, "ajustar", new=AsyncMock()) as service:
-        response = client.post(
-            "/movimientos-inventario/ajustes",
-            json={"motivo": "RECEPCION", "items": [{"sku_id": str(uuid4()), "cantidad": 1}]},
-        )
-
-    assert response.status_code == 422
-    service.assert_not_awaited()
-
-
-def test_ya_no_se_crea_un_movimiento_suelto(
-    route_context: tuple[TestClient, CurrentUser, MagicMock],
-) -> None:
-    client, _, _ = route_context
-
-    assert client.post("/movimientos-inventario/", json={}).status_code == 405
-
-
-def test_list_pasa_filtros(
+def test_list_pasa_filtros_y_responde_sku_y_origen(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
     client, _, db_session = route_context
-    page = PaginatedResponse[MovimientoInventario](
+    page = PaginatedResponse[MovimientoInventarioResponse](
         total=1, page=1, per_page=20, total_pages=1, data=[_movimiento()]
     )
-    sku_id = uuid4()
+    sku_id, ajuste_id = uuid4(), uuid4()
 
     with patch.object(MovimientoInventarioService, "list", new=AsyncMock(return_value=page)) as service:
         response = client.get(
-            f"/movimientos-inventario/?sku_id={sku_id}&tipo=AJUSTE&motivo=MERMA&desde=2026-11-01"
+            f"/movimientos-inventario/?sku_id={sku_id}&tipo=AJUSTE&motivo=MERMA&ajuste_id={ajuste_id}&desde=2026-11-01"
         )
 
     assert response.status_code == 200
-    assert response.json()["data"][0]["tipo"] == "AJUSTE"
+    [fila] = response.json()["data"]
+    assert fila["sku"]["producto_nombre"] == "Camisa Oxford"
+    assert fila["origen"] == {"tipo": "AJUSTE", "id": fila["origen"]["id"], "numero": 12, "motivo": "RECEPCION"}
     assert service.await_args.args[0] is db_session
     kwargs = service.await_args.kwargs
-    assert (kwargs["sku_id"], kwargs["tipo"], kwargs["motivo"]) == (sku_id, TipoMovimiento.AJUSTE, MotivoAjuste.MERMA)
+    assert (kwargs["sku_id"], kwargs["tipo"], kwargs["motivo"], kwargs["ajuste_id"]) == (
+        sku_id,
+        TipoMovimiento.AJUSTE,
+        MotivoAjuste.MERMA,
+        ajuste_id,
+    )
+
+
+def test_get_responde_la_fila(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, _, _ = route_context
+    movimiento = _movimiento()
+
+    with patch.object(MovimientoInventarioService, "get", new=AsyncMock(return_value=movimiento)):
+        response = client.get(f"/movimientos-inventario/{movimiento.id}")
+
+    assert response.status_code == 200
+    assert response.json()["saldo_valor"] == 432
 
 
 def test_costos_no_se_confunde_con_un_id(
@@ -154,54 +103,35 @@ def test_costos_no_se_confunde_con_un_id(
     assert service.await_args.kwargs["nombre"] == "camisa"
 
 
-@pytest.mark.parametrize(
-    ("method", "path"),
-    [
-        ("get", "/movimientos-inventario/"),
-        ("get", "/movimientos-inventario/costos"),
-        ("post", "/movimientos-inventario/ajustes"),
-    ],
-)
+@pytest.mark.parametrize("path", ["/movimientos-inventario/", "/movimientos-inventario/costos"])
 def test_cajero_no_accede_al_kardex_ni_a_los_costos(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
-    method: str,
     path: str,
 ) -> None:
     client, current_user, _ = route_context
     current_user.rol = Role.CAJERO
 
-    response = client.request(method, path, json={})
-
-    assert response.status_code == 403
+    assert client.get(path).status_code == 403
 
 
-def test_admin_no_tiene_auditoria(
-    route_context: tuple[TestClient, CurrentUser, MagicMock],
-) -> None:
-    client, _, _ = route_context
-
-    assert client.get(f"/movimientos-inventario/{uuid4()}/audit").status_code == 403
-
-
-def test_superadmin_consulta_auditoria(
-    route_context: tuple[TestClient, CurrentUser, MagicMock],
-) -> None:
-    client, current_user, _ = route_context
-    current_user.rol = Role.SUPERADMIN
-    movimiento = _movimiento()
-
-    with patch.object(MovimientoInventarioService, "get", new=AsyncMock(return_value=movimiento)):
-        response = client.get(f"/movimientos-inventario/{movimiento.id}/audit")
-
-    assert response.status_code == 200
-    assert response.json()["updated_by"] == str(movimiento.updated_by)
-
-
-@pytest.mark.parametrize("method", ["patch", "put", "delete"])
-def test_un_movimiento_no_se_edita_ni_se_elimina(
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("post", "/movimientos-inventario/"),
+        ("post", "/movimientos-inventario/ajustes"),
+        ("patch", "/movimientos-inventario/{id}"),
+        ("put", "/movimientos-inventario/{id}"),
+        ("delete", "/movimientos-inventario/{id}"),
+        ("get", "/movimientos-inventario/{id}/audit"),
+    ],
+)
+def test_el_kardex_es_de_solo_lectura(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
     method: str,
+    path: str,
 ) -> None:
     client, _, _ = route_context
 
-    assert getattr(client, method)(f"/movimientos-inventario/{uuid4()}").status_code == 405
+    response = client.request(method, path.format(id=uuid4()), json={})
+
+    assert response.status_code in (404, 405)

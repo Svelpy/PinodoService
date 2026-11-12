@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.base_model import utc_now
 from app.core.config import Settings
 from app.core.logging import get_logger
+from app.domains.ajustes_inventario.services import CargaInicial
 from app.domains.categoria_productos.models import CategoriaProducto
 from app.domains.categoria_productos.repositories import CategoriaProductoRepository
 from app.domains.categoria_productos.services import CategoriaProductoService
@@ -263,9 +264,10 @@ class ProductoService:
             )
 
         upload_destinations: dict[str, str] = {}
+        carga = CargaInicial(db_session, actor_id, utc_now())
         for color in data.colores:
             producto_color = ProductoColorService.add_detail_create(
-                db_session, producto.id, color, actor_id
+                db_session, producto.id, color, actor_id, carga
             )
             upload_destinations |= ProductoColorService.upload_destinations(producto_color, color)
 

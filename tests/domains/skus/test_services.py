@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.domains.ajustes_inventario.repositories import AjusteInventarioRepository
 from app.domains.movimientos_inventario.repositories import MovimientoInventarioRepository
 from app.domains.producto_colores.models import ProductoColor
 from app.domains.producto_colores.repositories import ProductoColorRepository
@@ -13,7 +14,7 @@ from app.domains.skus.schemas import SkuCreate, SkuResponse
 from app.domains.skus.services import SkuService
 from app.domains.tallas.models import Talla
 from app.domains.tallas.repositories import TallaRepository
-from app.shared.enums import TipoMovimiento
+from app.shared.enums import MotivoAjuste, TipoMovimiento
 from app.shared.errors.exceptions import AppException
 
 
@@ -73,19 +74,23 @@ async def test_create_guarda_precio_y_stock_como_json() -> None:
         patch.object(SkuRepository, "get_active_by_codigo_barras", new=AsyncMock()) as by_codigo,
         patch.object(SkuRepository, "add") as add,
         patch.object(MovimientoInventarioRepository, "add") as add_movimiento,
+        patch.object(AjusteInventarioRepository, "add") as add_ajuste,
         patch.object(
             SkuService, "get", new=AsyncMock(side_effect=lambda *a, **k: add.call_args.args[0])
         ) as get,
     ):
         sku = await SkuService.create(session, _create_data(), actor_id)
 
-    # El stock inicial entra al kardex como un movimiento INICIAL a su costo.
+    # El stock inicial entra al kardex por un documento INICIAL, a su costo.
+    [ajuste] = [call.args[0] for call in add_ajuste.call_args_list]
+    assert (ajuste.motivo, ajuste.created_by) == (MotivoAjuste.INICIAL, actor_id)
     [movimiento] = [call.args[0] for call in add_movimiento.call_args_list]
-    assert (movimiento.sku_id, movimiento.tipo, movimiento.cantidad, movimiento.saldo) == (
+    assert (movimiento.sku_id, movimiento.tipo, movimiento.cantidad, movimiento.saldo, movimiento.ajuste_id) == (
         sku.id,
-        TipoMovimiento.INICIAL,
+        TipoMovimiento.AJUSTE,
         12,
         12,
+        ajuste.id,
     )
     assert movimiento.costo_unitario == movimiento.costo_promedio == Decimal("12.50")
     assert sku.costo == Decimal("12.50")
