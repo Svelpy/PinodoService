@@ -11,11 +11,11 @@ from app.core.base_model import utc_now
 from app.core.config import get_settings
 from app.domains.movimientos_inventario.models import MovimientoInventario
 from app.domains.movimientos_inventario.repositories import MovimientoInventarioRepository
-from app.domains.movimientos_inventario.schemas import MovimientoInventarioCreate
+from app.domains.movimientos_inventario.schemas import AjusteInventarioCreate
 from app.domains.movimientos_inventario.services import MovimientoInventarioService
 from app.domains.skus.models import Sku
 from app.domains.skus.repositories import SkuRepository
-from app.shared.enums import TipoMovimiento
+from app.shared.enums import MotivoAjuste, TipoMovimiento
 from app.shared.errors.exceptions import AppException
 
 
@@ -37,17 +37,21 @@ def _sku(cantidad: int = 10, costo: str = "10") -> Sku:
 
 
 @contextmanager
-def _repos(sku: Sku | None) -> Iterator[dict[str, MagicMock]]:
+def _repos(*skus: Sku) -> Iterator[dict[str, MagicMock]]:
+    added: dict[object, MovimientoInventario] = {}
     with (
-        patch.object(SkuRepository, "get_by_id", new=AsyncMock(return_value=sku)) as get_sku,
+        patch.object(
+            SkuRepository, "list_active_by_ids", new=AsyncMock(return_value=list(skus))
+        ) as get_skus,
         patch.object(MovimientoInventarioRepository, "add") as add,
         patch.object(
-            MovimientoInventarioService,
-            "get",
-            new=AsyncMock(side_effect=lambda s, movimiento_id, **_: movimiento_id),
+            MovimientoInventarioRepository,
+            "list_by_ids",
+            new=AsyncMock(side_effect=lambda ids: [added[i] for i in ids]),
         ),
     ):
-        yield {"get_sku": get_sku, "add": add}
+        add.side_effect = lambda movimiento: added.__setitem__(movimiento.id, movimiento)
+        yield {"get_skus": get_skus, "add": add}
 
 
 def _registrar(sku: Sku, tipo: TipoMovimiento, cantidad: int, **kwargs: object) -> MovimientoInventario:
@@ -83,25 +87,35 @@ def test_costo_promedio_ponderado(
 # ---------------------------------------------------------------- registrar
 
 
-def test_ingreso_sube_stock_y_recalcula_el_promedio() -> None:
+def test_recepcion_sube_stock_y_recalcula_el_promedio() -> None:
     sku = _sku(cantidad=10, costo="10")
 
-    movimiento = _registrar(sku, TipoMovimiento.INGRESO, 10, costo_unitario=Decimal("20"), motivo="Lote")
+    movimiento = _registrar(
+        sku, TipoMovimiento.AJUSTE, 10, costo_unitario=Decimal("20"), motivo=MotivoAjuste.RECEPCION, nota="Lote"
+    )
 
     assert sku.stock["cantidad"] == 10 + 10
     assert sku.stock["actualizado"] is not None
     assert sku.costo == Decimal("15.00")
     assert (movimiento.cantidad, movimiento.saldo) == (10, 20)
     assert (movimiento.costo_unitario, movimiento.costo_promedio) == (Decimal("20"), Decimal("15.00"))
-    assert movimiento.motivo == "Lote"
+    assert (movimiento.motivo, movimiento.nota) == (MotivoAjuste.RECEPCION, "Lote")
     assert movimiento.venta_id is None
 
 
+def test_inicial_parte_del_costo_del_sku_nuevo() -> None:
+    sku = _sku(cantidad=0, costo="22.40")
+
+    movimiento = _registrar(sku, TipoMovimiento.INICIAL, 5, costo_unitario=Decimal("22.40"))
+
+    assert (movimiento.saldo, movimiento.costo_promedio, sku.costo) == (5, Decimal("22.40"), Decimal("22.40"))
+
+
 @pytest.mark.parametrize("cantidad", [-3, 3])
-def test_ajuste_mueve_el_stock_sin_cambiar_el_costo(cantidad: int) -> None:
+def test_ajuste_sin_costo_mueve_el_stock_sin_cambiar_el_costo(cantidad: int) -> None:
     sku = _sku(cantidad=10, costo="10")
 
-    movimiento = _registrar(sku, TipoMovimiento.AJUSTE, cantidad, motivo="Conteo")
+    movimiento = _registrar(sku, TipoMovimiento.AJUSTE, cantidad, motivo=MotivoAjuste.CONTEO)
 
     assert sku.stock["cantidad"] == 10 + cantidad
     assert sku.costo == Decimal("10")
@@ -112,7 +126,7 @@ def test_movimiento_que_deja_stock_negativo_responde_409_sin_tocar_el_sku() -> N
     sku = _sku(cantidad=2)
 
     with pytest.raises(AppException) as error:
-        _registrar(sku, TipoMovimiento.AJUSTE, -3, motivo="Merma")
+        _registrar(sku, TipoMovimiento.AJUSTE, -3, motivo=MotivoAjuste.MERMA)
 
     assert error.value.status_code == 409
     assert error.value.details["stock_actual"] == 2
@@ -131,57 +145,118 @@ def test_anulacion_sin_costo_conocido_usa_el_promedio_actual() -> None:
     assert sku.stock["cantidad"] == 5
 
 
-# ---------------------------------------------------------------- create
+# ---------------------------------------------------------------- ajustar
+
+
+def _data(motivo: str, *items: dict[str, object], nota: str | None = None) -> AjusteInventarioCreate:
+    return AjusteInventarioCreate.model_validate({"motivo": motivo, "nota": nota, "items": list(items)})
 
 
 @pytest.mark.asyncio
-async def test_create_bloquea_el_sku_registra_y_hace_commit() -> None:
-    sku = _sku(cantidad=4, costo="10")
+async def test_recepcion_de_varios_skus_bloquea_registra_y_hace_commit() -> None:
+    camisa, pantalon = _sku(cantidad=4, costo="10"), _sku(cantidad=0, costo="0")
     actor_id = uuid4()
     session = _session()
-    data = MovimientoInventarioCreate.model_validate(
-        {"sku_id": str(sku.id), "tipo": "INGRESO", "cantidad": 6, "costo_unitario": "15"}
+    data = _data(
+        "RECEPCION",
+        {"sku_id": str(camisa.id), "cantidad": 6, "costo_unitario": "15"},
+        {"sku_id": str(pantalon.id), "cantidad": 3, "costo_unitario": "40"},
+        nota="Lote",
     )
 
-    with _repos(sku) as repos:
-        resultado = await MovimientoInventarioService.create(session, data, actor_id)
+    with _repos(camisa, pantalon) as repos:
+        resultado = await MovimientoInventarioService.ajustar(session, data, actor_id)
 
-    assert repos["get_sku"].call_args.kwargs == {"for_update": True}
-    [movimiento] = [call.args[0] for call in repos["add"].call_args_list]
-    assert resultado == movimiento.id
-    assert movimiento.created_by == actor_id
-    assert (movimiento.tipo, movimiento.saldo) == (TipoMovimiento.INGRESO, 10)
-    assert sku.costo == Decimal("13.00")
+    assert repos["get_skus"].call_args.args[0] == [camisa.id, pantalon.id]
+    assert repos["get_skus"].call_args.kwargs == {"for_update": True}
+    assert [m.sku_id for m in resultado.movimientos] == [camisa.id, pantalon.id]
+    primero = resultado.movimientos[0]
+    assert (primero.tipo, primero.motivo, primero.nota) == (TipoMovimiento.AJUSTE, MotivoAjuste.RECEPCION, "Lote")
+    assert primero.created_by == actor_id
+    assert (camisa.costo, pantalon.costo) == (Decimal("13.00"), Decimal("40"))
+    assert (camisa.stock["cantidad"], pantalon.stock["cantidad"]) == (10, 3)
+    assert resultado.sin_diferencia == []
     session.commit.assert_awaited_once()
 
 
+@pytest.mark.parametrize("motivo", ["MERMA", "ROBO_PERDIDA"])
 @pytest.mark.asyncio
-async def test_create_con_sku_inexistente_responde_422() -> None:
-    data = MovimientoInventarioCreate.model_validate(
-        {"sku_id": str(uuid4()), "tipo": "AJUSTE", "cantidad": 1, "motivo": "Conteo"}
+async def test_salidas_restan_lo_enviado_sin_cambiar_el_costo(motivo: str) -> None:
+    sku = _sku(cantidad=5, costo="10")
+
+    with _repos(sku):
+        resultado = await MovimientoInventarioService.ajustar(
+            _session(), _data(motivo, {"sku_id": str(sku.id), "cantidad": 2}), uuid4()
+        )
+
+    [movimiento] = resultado.movimientos
+    assert (movimiento.cantidad, movimiento.saldo, movimiento.costo_unitario) == (-2, 3, Decimal("10"))
+    assert sku.costo == Decimal("10")
+
+
+@pytest.mark.asyncio
+async def test_conteo_registra_la_diferencia_y_omite_los_que_coinciden() -> None:
+    sobra, falta, igual = _sku(cantidad=5), _sku(cantidad=5), _sku(cantidad=5)
+    data = _data(
+        "CONTEO",
+        {"sku_id": str(sobra.id), "cantidad_contada": 7},
+        {"sku_id": str(falta.id), "cantidad_contada": 0},
+        {"sku_id": str(igual.id), "cantidad_contada": 5},
     )
+
+    with _repos(sobra, falta, igual):
+        resultado = await MovimientoInventarioService.ajustar(_session(), data, uuid4())
+
+    assert [(m.cantidad, m.saldo) for m in resultado.movimientos] == [(2, 7), (-5, 0)]
+    assert resultado.sin_diferencia == [igual.id]
+
+
+@pytest.mark.asyncio
+async def test_conteo_sin_diferencias_no_hace_commit() -> None:
+    sku = _sku(cantidad=5)
     session = _session()
 
-    with _repos(None) as repos, pytest.raises(AppException) as error:
-        await MovimientoInventarioService.create(session, data, uuid4())
+    with _repos(sku) as repos:
+        resultado = await MovimientoInventarioService.ajustar(
+            session, _data("CONTEO", {"sku_id": str(sku.id), "cantidad_contada": 5}), uuid4()
+        )
 
-    assert error.value.status_code == 422
+    assert resultado.movimientos == [] and resultado.sin_diferencia == [sku.id]
     repos["add"].assert_not_called()
     session.commit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_create_ajuste_que_deja_stock_negativo_no_hace_commit() -> None:
-    sku = _sku(cantidad=1)
-    data = MovimientoInventarioCreate.model_validate(
-        {"sku_id": str(sku.id), "tipo": "AJUSTE", "cantidad": -2, "motivo": "Merma"}
+async def test_sku_inexistente_responde_422_con_su_posicion() -> None:
+    sku = _sku()
+    data = _data("MERMA", {"sku_id": str(sku.id), "cantidad": 1}, {"sku_id": str(uuid4()), "cantidad": 1})
+    session = _session()
+
+    with _repos(sku) as repos, pytest.raises(AppException) as error:
+        await MovimientoInventarioService.ajustar(session, data, uuid4())
+
+    assert error.value.status_code == 422
+    assert "items -> 1 -> sku_id" in error.value.details
+    repos["add"].assert_not_called()
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_un_stock_negativo_rechaza_todo_el_ajuste() -> None:
+    alcanza, no_alcanza = _sku(cantidad=5), _sku(cantidad=1)
+    data = _data(
+        "MERMA",
+        {"sku_id": str(alcanza.id), "cantidad": 1},
+        {"sku_id": str(no_alcanza.id), "cantidad": 2},
     )
     session = _session()
 
-    with _repos(sku), pytest.raises(AppException) as error:
-        await MovimientoInventarioService.create(session, data, uuid4())
+    with _repos(alcanza, no_alcanza), pytest.raises(AppException) as error:
+        await MovimientoInventarioService.ajustar(session, data, uuid4())
 
     assert error.value.status_code == 409
+    assert error.value.details["stock_actual"] == 1
+    assert "items -> 1" in error.value.details
     session.commit.assert_not_awaited()
 
 

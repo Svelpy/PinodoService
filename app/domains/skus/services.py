@@ -23,7 +23,6 @@ from app.domains.skus.schemas import (
     SkuPrecio,
     SkuResponse,
     SkuStockInput,
-    SkuStockUpdate,
 )
 from app.domains.tallas.repositories import TallaRepository
 from app.shared.enums import TipoMovimiento
@@ -120,8 +119,8 @@ class SkuService:
     ) -> Sku:
         """
         Añade a la sesión un SKU nuevo ya validado. Su stock inicial entra al
-        kardex como un INGRESO a data.costo, así que el SKU nace con stock 0 y
-        el movimiento lo sube. No hace commit.
+        kardex como un movimiento INICIAL a data.costo, así que el SKU nace con
+        stock 0 y el movimiento lo sube. No hace commit.
         """
         stock = data.stock or SkuStockInput()
         sku = Sku(
@@ -139,12 +138,11 @@ class SkuService:
             MovimientoInventarioService.registrar(
                 db_session,
                 sku,
-                TipoMovimiento.INGRESO,
+                TipoMovimiento.INICIAL,
                 stock.cantidad,
                 actor_id,
                 now,
                 costo_unitario=data.costo,
-                motivo="Stock inicial",
             )
         return sku
 
@@ -426,39 +424,6 @@ class SkuService:
         # Responde lo mismo que GET /{id}: se recarga con su Detail, tomando
         # antes el id para no disparar una carga implícita.
         sku_id = sku.id
-        db_session.expire_all()
-        return await cls.get(db_session, sku_id, load_detail=True)
-
-    @classmethod
-    async def update_stock(
-        cls,
-        db_session: AsyncSession,
-        sku_id: UUID,
-        data: SkuStockUpdate,
-        actor_id: UUID,
-    ) -> Sku:
-        """
-        Cambia el stock mínimo. La cantidad solo cambia con movimientos del
-        kardex. Si nada cambia no se guarda. Devuelve el SKU con su Detail.
-        """
-        sku = await cls.get(db_session, sku_id, for_update=True)
-        minimo_actual = int(sku.stock.get("minimo", 0))
-
-        if data.minimo != minimo_actual:
-            now = utc_now()
-            sku.stock = {**sku.stock, "minimo": data.minimo, "actualizado": now.isoformat()}
-            sku.updated_at = now
-            sku.updated_by = actor_id
-            await cls._commit(db_session, sku)
-            logger.info(
-                "Stock mínimo actualizado: sku_id=%s minimo=%s->%s actor_id=%s",
-                sku_id,
-                minimo_actual,
-                data.minimo,
-                actor_id,
-            )
-
-        # Responde lo mismo que GET /{id}: se recarga con su Detail.
         db_session.expire_all()
         return await cls.get(db_session, sku_id, load_detail=True)
 

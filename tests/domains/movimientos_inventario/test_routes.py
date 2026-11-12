@@ -14,22 +14,27 @@ from app.domains.auth.dependencies import get_current_principal
 from app.domains.auth.schemas import CurrentUser
 from app.domains.movimientos_inventario.models import MovimientoInventario
 from app.domains.movimientos_inventario.routes import router
-from app.domains.movimientos_inventario.schemas import SkuCosto
+from app.domains.movimientos_inventario.schemas import (
+    AjusteInventarioResultado,
+    MovimientoInventarioListItem,
+    SkuCosto,
+)
 from app.domains.movimientos_inventario.services import MovimientoInventarioService
 from app.middlewares.exception_handlers import register_exception_handlers
-from app.shared.enums import Role, TipoMovimiento
+from app.shared.enums import MotivoAjuste, Role, TipoMovimiento
 from app.shared.schemas.pagination import PaginatedResponse
 
 
 def _movimiento() -> MovimientoInventario:
     movimiento = MovimientoInventario(
         sku_id=uuid4(),
-        tipo=TipoMovimiento.INGRESO,
+        tipo=TipoMovimiento.AJUSTE,
+        motivo=MotivoAjuste.RECEPCION,
         cantidad=24,
         saldo=30,
         costo_unitario=Decimal("12.50"),
         costo_promedio=Decimal("12.10"),
-        motivo="Lote de noviembre",
+        nota="Lote de noviembre",
         created_by=uuid4(),
         updated_by=uuid4(),
     )
@@ -60,41 +65,57 @@ def route_context() -> Iterator[tuple[TestClient, CurrentUser, MagicMock]]:
         yield client, current_user, db_session
 
 
-def test_create_pasa_el_actor_y_responde_detail(
+def test_ajuste_pasa_el_actor_y_responde_los_movimientos(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
     client, current_user, db_session = route_context
     movimiento = _movimiento()
+    resultado = AjusteInventarioResultado(
+        motivo=MotivoAjuste.RECEPCION,
+        movimientos=[MovimientoInventarioListItem.model_validate(movimiento)],
+        sin_diferencia=[],
+    )
 
-    with patch.object(MovimientoInventarioService, "create", new=AsyncMock(return_value=movimiento)) as service:
+    with patch.object(MovimientoInventarioService, "ajustar", new=AsyncMock(return_value=resultado)) as service:
         response = client.post(
-            "/movimientos-inventario/",
-            json={"sku_id": str(movimiento.sku_id), "tipo": "INGRESO", "cantidad": 24, "costo_unitario": 12.5},
+            "/movimientos-inventario/ajustes",
+            json={
+                "motivo": "RECEPCION",
+                "items": [{"sku_id": str(movimiento.sku_id), "cantidad": 24, "costo_unitario": 12.5}],
+            },
         )
 
     assert response.status_code == 201
-    body = response.json()
-    assert (body["costo_unitario"], body["costo_promedio"], body["saldo"]) == (12.5, 12.1, 30)
+    [body] = response.json()["movimientos"]
+    assert (body["motivo"], body["costo_unitario"], body["costo_promedio"]) == ("RECEPCION", 12.5, 12.1)
     assert body["sku"] is None and body["venta"] is None
     args = service.await_args.args
     assert args[0] is db_session
-    assert args[1].costo_unitario == Decimal("12.5")
+    assert args[1].items[0].costo_unitario == Decimal("12.5")
     assert args[2] == current_user.id
 
 
-def test_create_no_acepta_movimientos_de_venta(
+def test_ajuste_invalido_no_llega_al_service(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
     client, _, _ = route_context
 
-    with patch.object(MovimientoInventarioService, "create", new=AsyncMock()) as service:
+    with patch.object(MovimientoInventarioService, "ajustar", new=AsyncMock()) as service:
         response = client.post(
-            "/movimientos-inventario/",
-            json={"sku_id": str(uuid4()), "tipo": "VENTA", "cantidad": -1},
+            "/movimientos-inventario/ajustes",
+            json={"motivo": "RECEPCION", "items": [{"sku_id": str(uuid4()), "cantidad": 1}]},
         )
 
     assert response.status_code == 422
     service.assert_not_awaited()
+
+
+def test_ya_no_se_crea_un_movimiento_suelto(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, _, _ = route_context
+
+    assert client.post("/movimientos-inventario/", json={}).status_code == 405
 
 
 def test_list_pasa_filtros(
@@ -107,13 +128,15 @@ def test_list_pasa_filtros(
     sku_id = uuid4()
 
     with patch.object(MovimientoInventarioService, "list", new=AsyncMock(return_value=page)) as service:
-        response = client.get(f"/movimientos-inventario/?sku_id={sku_id}&tipo=AJUSTE&desde=2026-11-01")
+        response = client.get(
+            f"/movimientos-inventario/?sku_id={sku_id}&tipo=AJUSTE&motivo=MERMA&desde=2026-11-01"
+        )
 
     assert response.status_code == 200
-    assert response.json()["data"][0]["tipo"] == "INGRESO"
+    assert response.json()["data"][0]["tipo"] == "AJUSTE"
     assert service.await_args.args[0] is db_session
     kwargs = service.await_args.kwargs
-    assert (kwargs["sku_id"], kwargs["tipo"]) == (sku_id, TipoMovimiento.AJUSTE)
+    assert (kwargs["sku_id"], kwargs["tipo"], kwargs["motivo"]) == (sku_id, TipoMovimiento.AJUSTE, MotivoAjuste.MERMA)
 
 
 def test_costos_no_se_confunde_con_un_id(
@@ -136,7 +159,7 @@ def test_costos_no_se_confunde_con_un_id(
     [
         ("get", "/movimientos-inventario/"),
         ("get", "/movimientos-inventario/costos"),
-        ("post", "/movimientos-inventario/"),
+        ("post", "/movimientos-inventario/ajustes"),
     ],
 )
 def test_cajero_no_accede_al_kardex_ni_a_los_costos(

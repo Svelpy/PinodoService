@@ -109,28 +109,6 @@ class SkuStockInput(BaseModel):
     )
 
 
-class SkuStockUpdate(BaseModel):
-    """
-    Entrada de PATCH /skus/{id}/stock: minimo es el stock a partir del cual el
-    SKU aparece como bajo mínimo. La cantidad no se cambia aquí: entra y sale
-    con movimientos del kardex (POST /movimientos-inventario/).
-    """
-
-    minimo: int = Field(..., ge=0)
-
-    @field_validator("minimo", mode="before")
-    @classmethod
-    def validate_minimo(cls, value: object) -> int:
-        if value is None:
-            raise ValueError("El mínimo no puede ser null.")
-        return validator_non_negative_integer(value)
-
-    model_config = ConfigDict(
-        extra="forbid",
-        json_schema_extra={"example": {"minimo": 2}},
-    )
-
-
 class SkuStock(BaseModel):
     """Contenido del JSONB stock tal como se expone en la respuesta."""
 
@@ -158,7 +136,7 @@ class SkuDetailCreate(BaseModel):
 
     costo es lo que cuesta cada prenda; no se devuelve en la respuesta del SKU
     (se consulta en GET /movimientos-inventario/costos). stock.cantidad entra
-    al kardex como un INGRESO inicial a ese costo.
+    al kardex como un movimiento INICIAL a ese costo.
     """
 
     talla_id: UUID = Field(...)
@@ -236,12 +214,10 @@ class SkuDetailUpdate(SkuDetailCreate):
       stock es opcional y vale 0 si se omite.
     - Con id: actualiza ese SKU. Solo cambian los campos enviados; precio se
       envía completo y reemplaza al anterior. costo corrige el costo promedio
-      sin registrar un movimiento. No admite stock: el de un SKU que ya existe
-      entra y sale con movimientos del kardex (POST /movimientos-inventario/),
-      para no pisar lo que las ventas descontaron mientras el formulario
-      estaba abierto.
-
-    Por esa exclusión, el ejemplo muestra una fila existente y omite stock.
+      sin registrar un movimiento. De stock solo admite minimo, el umbral de
+      bajo mínimo: la cantidad de un SKU que ya existe entra y sale con
+      ajustes del kardex (POST /movimientos-inventario/ajustes), para no pisar
+      lo que las ventas descontaron mientras el formulario estaba abierto.
     """
 
     stock: SkuStockInput | None = Field(default=None)
@@ -250,10 +226,13 @@ class SkuDetailUpdate(SkuDetailCreate):
     @model_validator(mode="after")
     def validate_stock_solo_en_nuevas(self) -> "SkuDetailUpdate":
         if self.id is not None and self.stock is not None:
-            raise ValueError(
-                "El stock de un SKU existente no se cambia aquí; registra un "
-                "movimiento en POST /movimientos-inventario/."
-            )
+            if "cantidad" in self.stock.model_fields_set:
+                raise ValueError(
+                    "La cantidad de un SKU existente no se cambia aquí; regístrala "
+                    "con un ajuste en POST /movimientos-inventario/ajustes."
+                )
+            if "minimo" not in self.stock.model_fields_set:
+                raise ValueError("En un SKU existente, stock solo admite minimo.")
         return self
 
     model_config = ConfigDict(
@@ -265,6 +244,7 @@ class SkuDetailUpdate(SkuDetailCreate):
                 "is_visible": True,
                 "precio": {"normal": 29.95, "rebajado": 19.95, "rebaja_hasta": "2026-12-31"},
                 "costo": 12.5,
+                "stock": {"minimo": 3},
                 "id": "11111111-1111-4111-8111-111111111111",
             }
         },

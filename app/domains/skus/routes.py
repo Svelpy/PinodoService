@@ -14,7 +14,6 @@ from app.domains.skus.schemas import (
     SkuDetail,
     SkuInventarioItem,
     SkuResponseAudit,
-    SkuStockUpdate,
 )
 from app.domains.skus.services import SkuService
 from app.shared.enums import Action, Module
@@ -170,31 +169,6 @@ async def get_sku_audit(
     db_session: Annotated[AsyncSession, Depends(get_db)],
 ) -> SkuResponseAudit:
     return await SkuService.get(db_session, sku_id, include_deleted=True)
-
-
-@router.patch(
-    "/{sku_id}/stock",
-    response_model=SkuDetail,
-    summary="Cambiar stock mínimo de un SKU",
-    description=(
-        "minimo es el stock a partir del cual el SKU aparece como bajo mínimo. "
-        "La cantidad no se cambia aquí: entra y sale con movimientos del kardex "
-        "(POST /movimientos-inventario/). Responde el SKU, igual que GET /skus/{id}."
-    ),
-    responses=_error_responses(401, 403, 404, 422, 500),
-)
-async def update_sku_stock(
-    sku_id: UUID,
-    data: SkuStockUpdate,
-    current_user: Annotated[
-        CurrentUser,
-        Depends(require_permission(Module.SKU, Action.UPDATE)),
-    ],
-    db_session: Annotated[AsyncSession, Depends(get_db)],
-    settings: Annotated[Settings, Depends(get_settings)],
-) -> SkuDetail:
-    sku = await SkuService.update_stock(db_session, sku_id, data, current_user.id)
-    return SkuService.detail(sku, settings)
 
 
 @router.delete(

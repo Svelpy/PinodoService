@@ -79,11 +79,11 @@ async def test_create_guarda_precio_y_stock_como_json() -> None:
     ):
         sku = await SkuService.create(session, _create_data(), actor_id)
 
-    # El stock inicial entra al kardex como un INGRESO a su costo.
+    # El stock inicial entra al kardex como un movimiento INICIAL a su costo.
     [movimiento] = [call.args[0] for call in add_movimiento.call_args_list]
     assert (movimiento.sku_id, movimiento.tipo, movimiento.cantidad, movimiento.saldo) == (
         sku.id,
-        TipoMovimiento.INGRESO,
+        TipoMovimiento.INICIAL,
         12,
         12,
     )
@@ -339,37 +339,6 @@ async def test_sugerir_codigo_barras_falla_si_no_encuentra_uno_libre() -> None:
     assert error.value.status_code == 500
 
 
-# --- PATCH /skus/{id}/stock ---------------------------------------------------
-
-from app.domains.skus.schemas import SkuStockUpdate  # noqa: E402
-
-
-async def _update_stock(sku: Sku, body: dict[str, object], session: MagicMock | None = None) -> object:
-    def get(*_: object, load_detail: bool = False, **__: object) -> object:
-        return "detail" if load_detail else sku
-
-    with patch.object(SkuService, "get", new=AsyncMock(side_effect=get)) as get_mock:
-        result = await SkuService.update_stock(
-            session or _session(), sku.id, SkuStockUpdate.model_validate(body), uuid4()
-        )
-    # Bloquea el SKU igual que las ventas.
-    assert get_mock.await_args_list[0].kwargs == {"for_update": True}
-    return result
-
-
-@pytest.mark.asyncio
-async def test_minimo_conserva_la_cantidad() -> None:
-    sku = _sku()
-    session = _session()
-
-    result = await _update_stock(sku, {"minimo": 4}, session)
-
-    assert result == "detail"
-    assert (sku.stock["cantidad"], sku.stock["minimo"]) == (5, 4)
-    assert sku.stock["actualizado"] is not None
-    session.commit.assert_awaited_once()
-
-
 @pytest.mark.asyncio
 async def test_create_sin_stock_no_registra_movimiento() -> None:
     p1, p2 = _referencias_validas()
@@ -389,12 +358,3 @@ async def test_create_sin_stock_no_registra_movimiento() -> None:
     assert (sku.stock["cantidad"], sku.stock["minimo"], sku.costo) == (0, 1, Decimal("12.50"))
 
 
-@pytest.mark.asyncio
-async def test_mismo_minimo_no_guarda_ni_renueva_la_fecha() -> None:
-    sku = _sku()
-    session = _session()
-
-    await _update_stock(sku, {"minimo": 2}, session)
-
-    assert sku.stock["actualizado"] is None
-    session.commit.assert_not_awaited()

@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.domains.movimientos_inventario.models import MovimientoInventario
 from app.domains.skus.models import Sku
 from app.domains.ventas.models import Venta
-from app.shared.enums import TipoMovimiento
+from app.shared.enums import MotivoAjuste, TipoMovimiento
 
 
 class MovimientoInventarioRepository:
@@ -50,6 +50,7 @@ class MovimientoInventarioRepository:
         limit: int,
         sku_id: UUID | None = None,
         tipo: TipoMovimiento | None = None,
+        motivo: MotivoAjuste | None = None,
         venta_id: UUID | None = None,
         created_by: UUID | None = None,
         desde: datetime | None = None,
@@ -64,6 +65,8 @@ class MovimientoInventarioRepository:
             filters.append(MovimientoInventario.sku_id == sku_id)
         if tipo is not None:
             filters.append(MovimientoInventario.tipo == tipo)
+        if motivo is not None:
+            filters.append(MovimientoInventario.motivo == motivo)
         if venta_id is not None:
             filters.append(MovimientoInventario.venta_id == venta_id)
         if created_by is not None:
@@ -88,6 +91,21 @@ class MovimientoInventarioRepository:
             )
         )
         return list(result.scalars().all()), total
+
+    async def list_by_ids(self, movimiento_ids: list[UUID]) -> list[MovimientoInventario]:
+        """Movimientos con sus embebidos, en el orden de movimiento_ids."""
+        if not movimiento_ids:
+            return []
+        result = await self.db_session.execute(
+            self._with_embebidos(
+                select(MovimientoInventario).where(
+                    MovimientoInventario.id.in_(movimiento_ids),
+                    MovimientoInventario.is_deleted.is_(False),
+                )
+            )
+        )
+        por_id = {movimiento.id: movimiento for movimiento in result.scalars().all()}
+        return [por_id[movimiento_id] for movimiento_id in movimiento_ids if movimiento_id in por_id]
 
     def add(self, movimiento: MovimientoInventario) -> None:
         self.db_session.add(movimiento)

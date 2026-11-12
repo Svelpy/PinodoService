@@ -45,7 +45,7 @@ class Sku(BaseModel, table=True):
     is_visible: bool = Field(default=True, nullable=False)
     precio: dict[str, Any] = Field(default_factory=default_precio,sa_type=JSONB,nullable=False)
     stock: dict[str, Any] = Field(default_factory=default_stock,sa_type=JSONB,nullable=False)
-    # Costo promedio ponderado por unidad. Lo recalcula cada INGRESO del kardex
+    # Costo promedio ponderado por unidad. Lo recalcula cada RECEPCION del kardex
     # y se puede corregir a mano; solo lo ven los roles con acceso al kardex.
     costo: Decimal = Field(default=Decimal("0"), sa_type=Numeric(12, 2), nullable=False)
 

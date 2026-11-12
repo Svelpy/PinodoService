@@ -567,7 +567,7 @@ async def test_patch_edita_crea_y_elimina_skus() -> None:
             contexto,
             {
                 "skus": [
-                    _fila(editado, precio={"normal": 35}, is_visible=False),
+                    _fila(editado, precio={"normal": 35}, is_visible=False, stock={"minimo": 4}),
                     {"talla_id": str(talla_nueva), "precio": {"normal": 20}, "stock": {"cantidad": 5}},
                 ],
                 "sku_ids_eliminar": [str(eliminado.id)],
@@ -575,11 +575,13 @@ async def test_patch_edita_crea_y_elimina_skus() -> None:
             actor_id,
         )
 
-    # El SKU editado cambia solo lo enviado: el código omitido se conserva y el stock no se toca.
+    # El SKU editado cambia solo lo enviado: el código omitido se conserva y,
+    # del stock, solo cambia el mínimo.
     assert editado.precio["normal"] == 35.0
     assert editado.is_visible is False
     assert editado.codigo_barras == "841"
-    assert editado.stock["cantidad"] == 7
+    assert (editado.stock["cantidad"], editado.stock["minimo"]) == (7, 4)
+    assert editado.stock["actualizado"] is not None
     assert editado.updated_by == actor_id
     # Un SKU que no se envía no cambia.
     assert intacto.updated_by is None

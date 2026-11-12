@@ -103,6 +103,25 @@ class SkuRepository:
         result = await self.db_session.execute(statement.order_by(Sku.id))
         return list(result.scalars().all())
 
+    async def list_active_by_ids(
+        self,
+        sku_ids: Sequence[UUID],
+        *,
+        for_update: bool = False,
+    ) -> list[Sku]:
+        """
+        SKUs activos con esos ids, ordenados por id (el mismo orden de bloqueo
+        que las ventas). Los inexistentes o eliminados no aparecen.
+        """
+        if not sku_ids:
+            return []
+        statement = select(Sku).where(Sku.id.in_(sku_ids), Sku.is_deleted.is_(False))
+        if for_update:
+            statement = statement.with_for_update()
+
+        result = await self.db_session.execute(statement.order_by(Sku.id))
+        return list(result.scalars().all())
+
     async def soft_delete_by_ids(
         self,
         sku_ids: Sequence[UUID],

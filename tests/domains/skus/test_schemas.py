@@ -157,33 +157,3 @@ def test_sku_detail_conserva_precio_vigente_ya_calculado() -> None:
     assert again.precio_vigente == Decimal("80.0")
 
 
-# --- PATCH /skus/{id}/stock ---------------------------------------------------
-
-from app.domains.skus.schemas import SkuStockUpdate  # noqa: E402
-
-
-def test_stock_update_ejemplo_valida() -> None:
-    SkuStockUpdate.model_validate(SkuStockUpdate.model_config["json_schema_extra"]["example"])
-
-
-@pytest.mark.parametrize("body", [{"minimo": 3}, {"minimo": 0}])
-def test_stock_update_solo_cambia_el_minimo(body: dict[str, object]) -> None:
-    SkuStockUpdate.model_validate(body)
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        {},
-        # La cantidad entra y sale con movimientos del kardex.
-        {"ajuste": 5},
-        {"ajuste": -1, "minimo": 1},
-        {"minimo": -1},
-        {"minimo": None},
-        {"cantidad": 9},
-        {"cantidad_anterior": 4, "cantidad": 9},
-    ],
-)
-def test_stock_update_rechaza_valores_invalidos(body: dict[str, object]) -> None:
-    with pytest.raises(ValidationError):
-        SkuStockUpdate.model_validate(body)

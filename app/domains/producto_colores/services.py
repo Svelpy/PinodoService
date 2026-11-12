@@ -597,6 +597,9 @@ class ProductoColorService:
             precio = SkuService.replace_precio(sku.precio, fila.precio)
             if precio != sku.precio:
                 cambios["precio"] = precio
+            # De un SKU existente solo cambia el mínimo; la cantidad va por el kardex.
+            if fila.stock is not None and fila.stock.minimo != sku.stock.get("minimo"):
+                cambios["stock"] = {**sku.stock, "minimo": fila.stock.minimo, "actualizado": now.isoformat()}
             if cambios:
                 for field_name, value in cambios.items():
                     setattr(sku, field_name, value)

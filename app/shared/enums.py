@@ -79,7 +79,19 @@ class MetodoPago(str, Enum):
 
 
 class TipoMovimiento(str, Enum):
-    INGRESO = "INGRESO"
-    VENTA = "VENTA"
-    ANULACION = "ANULACION"
-    AJUSTE = "AJUSTE"
+    """Qué originó un movimiento del kardex."""
+
+    INICIAL = "INICIAL"  # stock con que nace un SKU
+    AJUSTE = "AJUSTE"  # POST /movimientos-inventario/ajustes, con un MotivoAjuste
+    VENTA = "VENTA"  # al confirmar una venta
+    ANULACION = "ANULACION"  # al cancelar una venta confirmada
+
+
+class MotivoAjuste(str, Enum):
+    """Por qué se ajustó a mano el stock. Solo en movimientos AJUSTE."""
+
+    RECEPCION = "RECEPCION"  # entra mercadería con su costo; recalcula el costo promedio
+    CONTEO = "CONTEO"  # conteo físico: se registra la diferencia con lo contado
+    MERMA = "MERMA"  # sale por daño o defecto
+    ROBO_PERDIDA = "ROBO_PERDIDA"  # sale por robo o pérdida
+    CORRECCION = "CORRECCION"  # corrige un error de carga, en cualquier sentido

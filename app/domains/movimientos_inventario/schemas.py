@@ -1,10 +1,11 @@
 """
 Kardex. Un movimiento no se edita ni se elimina: un error se corrige con otro
-movimiento (un AJUSTE). Por eso no hay Update ni DELETE.
+ajuste (CORRECCION). Por eso no hay Update ni DELETE.
 
-Los movimientos VENTA y ANULACION los registra el sistema al confirmar o
-anular una venta; a mano solo se registran INGRESO y AJUSTE. Los costos solo
-los ven los roles con acceso al kardex.
+Ninguna ruta crea un movimiento suelto: INICIAL lo registra el SKU al nacer,
+VENTA y ANULACION la venta al confirmarse o anularse, y AJUSTE el endpoint de
+ajustes (AjusteInventarioCreate). Los costos solo los ven los roles con acceso
+al kardex.
 """
 
 from datetime import datetime
@@ -15,32 +16,31 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_valid
 
 from app.domains.skus.schemas import SkuResponse
 from app.domains.ventas.schemas import VentaResponse
-from app.shared.enums import TipoMovimiento
+from app.shared.enums import MotivoAjuste, TipoMovimiento
 from app.shared.services.validators import (
     validator_integer,
     validator_non_empty_text,
+    validator_non_negative_integer,
     validator_non_negative_money,
 )
 
-TIPOS_MANUALES = frozenset({TipoMovimiento.INGRESO, TipoMovimiento.AJUSTE})
+MAX_ITEMS_POR_AJUSTE = 200
 
 
-class MovimientoInventarioCreate(BaseModel):
+class AjusteInventarioItem(BaseModel):
     """
-    Entrada de POST /movimientos-inventario/.
+    Un SKU del ajuste. Qué campos lleva depende del motivo del ajuste:
 
-    - INGRESO: entra mercadería. cantidad positiva y costo_unitario
-      obligatorio (lo que costó cada prenda); recalcula el costo promedio.
-    - AJUSTE: corrige el stock por merma, conteo físico o regalo. cantidad
-      positiva o negativa y motivo obligatorio; usa el costo promedio actual y
-      no acepta costo_unitario.
+    - RECEPCION: cantidad (> 0, unidades que entran) y costo_unitario.
+    - CONTEO: cantidad_contada (>= 0, lo que hay en el estante).
+    - MERMA y ROBO_PERDIDA: cantidad (> 0, unidades que salen).
+    - CORRECCION: cantidad positiva (entra) o negativa (sale), distinta de 0.
     """
 
     sku_id: UUID = Field(...)
-    tipo: TipoMovimiento = Field(...)
-    cantidad: int = Field(...)
+    cantidad: int | None = Field(default=None)
+    cantidad_contada: int | None = Field(default=None)
     costo_unitario: Decimal | None = Field(default=None, max_digits=12, decimal_places=2)
-    motivo: str | None = Field(default=None, min_length=1, max_length=200)
 
     @field_validator("sku_id")
     @classmethod
@@ -49,27 +49,22 @@ class MovimientoInventarioCreate(BaseModel):
             raise ValueError("El SKU no puede ser null.")
         return value
 
-    @field_validator("tipo")
-    @classmethod
-    def validate_tipo(cls, value: TipoMovimiento | None) -> TipoMovimiento:
-        if value is None:
-            raise ValueError("El tipo no puede ser null.")
-        if value not in TIPOS_MANUALES:
-            raise ValueError(
-                "Solo se registran a mano INGRESO y AJUSTE; VENTA y ANULACION los "
-                "registra la venta al confirmarse o anularse."
-            )
-        return value
-
     @field_validator("cantidad", mode="before")
     @classmethod
-    def validate_cantidad(cls, value: object) -> int:
+    def validate_cantidad(cls, value: object) -> int | None:
         if value is None:
-            raise ValueError("La cantidad no puede ser null.")
+            return None
         cantidad = validator_integer(value)
         if cantidad == 0:
             raise ValueError("La cantidad no puede ser 0.")
         return cantidad
+
+    @field_validator("cantidad_contada", mode="before")
+    @classmethod
+    def validate_cantidad_contada(cls, value: object) -> int | None:
+        if value is None:
+            return None
+        return validator_non_negative_integer(value)
 
     @field_validator("costo_unitario", mode="before")
     @classmethod
@@ -78,36 +73,109 @@ class MovimientoInventarioCreate(BaseModel):
             return None
         return validator_non_negative_money(value)
 
-    @field_validator("motivo", mode="before")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "sku_id": "11111111-1111-4111-8111-111111111111",
+                "cantidad": 24,
+                "cantidad_contada": 24,
+                "costo_unitario": 12.5,
+            }
+        },
+    )
+
+
+class AjusteInventarioCreate(BaseModel):
+    """
+    Entrada de POST /movimientos-inventario/ajustes: un ajuste manual de uno o
+    varios SKUs con el mismo motivo, en una sola transacción. Cada SKU que
+    cambia deja un movimiento AJUSTE con ese motivo y la nota.
+
+    nota es opcional, salvo en CORRECCION, donde explica qué se corrige.
+    """
+
+    motivo: MotivoAjuste = Field(...)
+    nota: str | None = Field(default=None, min_length=1, max_length=200)
+    items: list[AjusteInventarioItem] = Field(..., min_length=1, max_length=MAX_ITEMS_POR_AJUSTE)
+
+    @field_validator("motivo")
     @classmethod
-    def validate_motivo(cls, value: object) -> str | None:
+    def validate_motivo(cls, value: MotivoAjuste | None) -> MotivoAjuste:
+        if value is None:
+            raise ValueError("El motivo no puede ser null.")
+        return value
+
+    @field_validator("nota", mode="before")
+    @classmethod
+    def validate_nota(cls, value: object) -> str | None:
         if value is None:
             return None
         return validator_non_empty_text(value)
 
+    @field_validator("items", mode="before")
+    @classmethod
+    def validate_items(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("Los ítems no pueden ser null.")
+        return value
+
     @model_validator(mode="after")
-    def validate_por_tipo(self) -> "MovimientoInventarioCreate":
-        if self.tipo == TipoMovimiento.INGRESO:
-            if self.cantidad < 0:
-                raise ValueError("Un INGRESO tiene cantidad positiva; para sacar stock usa un AJUSTE.")
-            if self.costo_unitario is None:
-                raise ValueError("Un INGRESO necesita costo_unitario.")
-        else:
-            if self.costo_unitario is not None:
-                raise ValueError("Un AJUSTE usa el costo promedio actual; no envíes costo_unitario.")
-            if self.motivo is None:
-                raise ValueError("Un AJUSTE necesita un motivo (merma, conteo físico...).")
+    def validate_por_motivo(self) -> "AjusteInventarioCreate":
+        if self.motivo == MotivoAjuste.CORRECCION and self.nota is None:
+            raise ValueError("Una CORRECCION necesita una nota que explique qué se corrige.")
+
+        vistos: set[UUID] = set()
+        for index, item in enumerate(self.items):
+            path = f"items -> {index}"
+            if item.sku_id in vistos:
+                raise ValueError(f"{path}: el SKU está repetido en el ajuste.")
+            vistos.add(item.sku_id)
+
+            if self.motivo == MotivoAjuste.CONTEO:
+                if item.cantidad_contada is None:
+                    raise ValueError(f"{path}: un CONTEO envía cantidad_contada, lo que hay en el estante.")
+                if item.cantidad is not None:
+                    raise ValueError(f"{path}: un CONTEO envía cantidad_contada, no cantidad.")
+            else:
+                if item.cantidad_contada is not None:
+                    raise ValueError(f"{path}: cantidad_contada solo se envía en un CONTEO.")
+                if item.cantidad is None:
+                    raise ValueError(f"{path}: falta la cantidad.")
+                if self.motivo != MotivoAjuste.CORRECCION and item.cantidad < 0:
+                    raise ValueError(
+                        f"{path}: la cantidad de un {self.motivo.value} es positiva "
+                        "(las unidades que entran o salen)."
+                    )
+
+            if self.motivo == MotivoAjuste.RECEPCION:
+                if item.costo_unitario is None:
+                    raise ValueError(f"{path}: una RECEPCION necesita costo_unitario.")
+            elif item.costo_unitario is not None:
+                raise ValueError(
+                    f"{path}: solo una RECEPCION envía costo_unitario; los demás ajustes "
+                    "usan el costo promedio actual."
+                )
         return self
 
     model_config = ConfigDict(
         extra="forbid",
         json_schema_extra={
             "example": {
-                "sku_id": "11111111-1111-4111-8111-111111111111",
-                "tipo": "INGRESO",
-                "cantidad": 24,
-                "costo_unitario": 12.5,
-                "motivo": "Lote de noviembre",
+                "motivo": "RECEPCION",
+                "nota": "Lote de noviembre",
+                "items": [
+                    {
+                        "sku_id": "11111111-1111-4111-8111-111111111111",
+                        "cantidad": 24,
+                        "costo_unitario": 12.5,
+                    },
+                    {
+                        "sku_id": "33333333-3333-4333-8333-333333333333",
+                        "cantidad": 12,
+                        "costo_unitario": 12.5,
+                    },
+                ],
             }
         },
     )
@@ -116,18 +184,20 @@ class MovimientoInventarioCreate(BaseModel):
 class MovimientoInventarioResponse(BaseModel):
     """
     cantidad es positiva si entra y negativa si sale; saldo es el stock que
-    quedó. costo_promedio es el costo del SKU después del movimiento: el saldo
+    quedó. motivo y nota solo los tiene un AJUSTE; venta_id, una VENTA o
+    una ANULACION. costo_promedio es el costo del SKU después del movimiento: el saldo
     valorizado es saldo × costo_promedio. created_by es quien lo registró.
     """
 
     id: UUID
     sku_id: UUID
     tipo: TipoMovimiento
+    motivo: MotivoAjuste | None
     cantidad: int
     saldo: int
     costo_unitario: Decimal
     costo_promedio: Decimal
-    motivo: str | None
+    nota: str | None
     venta_id: UUID | None
     created_at: datetime
     created_by: UUID | None
@@ -142,12 +212,13 @@ class MovimientoInventarioResponse(BaseModel):
             "example": {
                 "id": "44444444-4444-4444-8444-444444444444",
                 "sku_id": "11111111-1111-4111-8111-111111111111",
-                "tipo": "VENTA",
-                "cantidad": -2,
-                "saldo": 10,
+                "tipo": "AJUSTE",
+                "motivo": "RECEPCION",
+                "cantidad": 24,
+                "saldo": 36,
                 "costo_unitario": 12.5,
-                "costo_promedio": 12.5,
-                "motivo": "Venta confirmada",
+                "costo_promedio": 12.1,
+                "nota": "Lote de noviembre",
                 "venta_id": "66666666-6666-4666-8666-666666666666",
                 "created_at": "2026-11-07T15:00:00Z",
                 "created_by": "22222222-2222-4222-8222-222222222222",
@@ -177,7 +248,7 @@ class MovimientoInventarioResponseAudit(MovimientoInventarioResponse):
 class MovimientoInventarioListItem(MovimientoInventarioResponse):
     """
     sku y venta son referencias y se embeben con su Response. sku es null si
-    el SKU fue eliminado; venta, en los INGRESO y AJUSTE.
+    el SKU fue eliminado; venta, en los INICIAL y AJUSTE.
     """
 
     sku: SkuResponse | None
@@ -238,6 +309,28 @@ class SkuCosto(BaseModel):
                 "cantidad": 12,
                 "costo": 12.5,
                 "valor": 150,
+            }
+        },
+    )
+
+
+class AjusteInventarioResultado(BaseModel):
+    """
+    Respuesta de POST /movimientos-inventario/ajustes. movimientos son los
+    creados, en el orden de los ítems; sin_diferencia, los SKUs de un CONTEO
+    cuyo stock ya coincidía con lo contado (no dejan movimiento).
+    """
+
+    motivo: MotivoAjuste
+    movimientos: list[MovimientoInventarioListItem]
+    sin_diferencia: list[UUID]
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "motivo": "RECEPCION",
+                "movimientos": [MovimientoInventarioListItem.model_config["json_schema_extra"]["example"]],
+                "sin_diferencia": ["33333333-3333-4333-8333-333333333333"],
             }
         },
     )

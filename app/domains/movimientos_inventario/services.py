@@ -10,10 +10,15 @@ from app.core.config import Settings
 from app.core.logging import get_logger
 from app.domains.movimientos_inventario.models import MovimientoInventario
 from app.domains.movimientos_inventario.repositories import MovimientoInventarioRepository
-from app.domains.movimientos_inventario.schemas import MovimientoInventarioCreate, SkuCosto
+from app.domains.movimientos_inventario.schemas import (
+    AjusteInventarioCreate,
+    AjusteInventarioResultado,
+    MovimientoInventarioListItem,
+    SkuCosto,
+)
 from app.domains.skus.models import Sku
 from app.domains.skus.repositories import SkuRepository
-from app.shared.enums import TipoMovimiento
+from app.shared.enums import MotivoAjuste, TipoMovimiento
 from app.shared.errors.codes import ErrorCode
 from app.shared.errors.exceptions import AppException
 from app.shared.schemas.pagination import PaginatedResponse
@@ -22,8 +27,8 @@ from app.shared.schemas.pagination import PaginatedResponse
 logger = get_logger(__name__)
 
 CENTAVO = Decimal("0.01")
-# Movimientos que entran con su propio costo y recalculan el promedio.
-TIPOS_CON_COSTO_PROPIO = frozenset({TipoMovimiento.INGRESO, TipoMovimiento.ANULACION})
+# Motivos cuya cantidad son unidades que salen: el cliente las envía positivas.
+MOTIVOS_DE_SALIDA = frozenset({MotivoAjuste.MERMA, MotivoAjuste.ROBO_PERDIDA})
 
 
 class MovimientoInventarioService:
@@ -83,7 +88,8 @@ class MovimientoInventarioService:
         now: datetime,
         *,
         costo_unitario: Decimal | None = None,
-        motivo: str | None = None,
+        motivo: MotivoAjuste | None = None,
+        nota: str | None = None,
         venta_id: UUID | None = None,
         field_name: str = "cantidad",
     ) -> MovimientoInventario:
@@ -91,9 +97,10 @@ class MovimientoInventarioService:
         Mueve el stock del SKU (que debe estar bloqueado) y agrega su
         movimiento. No hace commit.
 
-        INGRESO y ANULACION entran a costo_unitario y recalculan el costo
-        promedio (una ANULACION sin costo conocido usa el promedio actual).
-        VENTA y AJUSTE usan el costo promedio actual y no lo cambian.
+        Con costo_unitario, lo que entra recalcula el costo promedio: INICIAL,
+        una RECEPCION y una ANULACION (sin costo conocido, una ANULACION usa el
+        promedio actual). Sin él, el movimiento usa el costo actual y no lo
+        cambia.
         Responde 409 con stock_actual si el stock quedaría negativo.
         """
         actual = int(sku.stock.get("cantidad", 0))
@@ -108,7 +115,7 @@ class MovimientoInventarioService:
             )
 
         costo_actual = Decimal(sku.costo)
-        if tipo in TIPOS_CON_COSTO_PROPIO and costo_unitario is not None:
+        if costo_unitario is not None and cantidad > 0:
             costo = costo_unitario
             sku.costo = cls.costo_promedio(actual, costo_actual, cantidad, costo_unitario)
         else:
@@ -126,6 +133,7 @@ class MovimientoInventarioService:
             costo_unitario=costo,
             costo_promedio=sku.costo,
             motivo=motivo,
+            nota=nota,
             venta_id=venta_id,
             created_at=now,
             created_by=actor_id,
@@ -169,6 +177,7 @@ class MovimientoInventarioService:
         per_page: int = 20,
         sku_id: UUID | None = None,
         tipo: TipoMovimiento | None = None,
+        motivo: MotivoAjuste | None = None,
         venta_id: UUID | None = None,
         created_by: UUID | None = None,
         desde: date | None = None,
@@ -184,6 +193,7 @@ class MovimientoInventarioService:
             limit=per_page,
             sku_id=sku_id,
             tipo=tipo,
+            motivo=motivo,
             venta_id=venta_id,
             created_by=created_by,
             desde=cls._local_start(desde, settings) if desde is not None else None,
@@ -248,43 +258,77 @@ class MovimientoInventarioService:
 
     # ------------------------------------------------------------------ escritura
 
+    @staticmethod
+    def _cantidad(data: AjusteInventarioCreate, index: int, actual: int) -> int:
+        """Cantidad firmada del movimiento: + entra, − sale; 0 si no cambia."""
+        item = data.items[index]
+        if data.motivo == MotivoAjuste.CONTEO:
+            return item.cantidad_contada - actual
+        if data.motivo in MOTIVOS_DE_SALIDA:
+            return -item.cantidad
+        return item.cantidad
+
     @classmethod
-    async def create(
+    async def ajustar(
         cls,
         db_session: AsyncSession,
-        data: MovimientoInventarioCreate,
+        data: AjusteInventarioCreate,
         actor_id: UUID,
-    ) -> MovimientoInventario:
+    ) -> AjusteInventarioResultado:
         """
-        Registra un INGRESO o un AJUSTE con el SKU bloqueado, para no pisar lo
-        que mueven las ventas al mismo tiempo. Un SKU inexistente o eliminado
-        responde 422; si el stock quedaría negativo, 409 con stock_actual.
+        Aplica un ajuste manual a todos sus SKUs o a ninguno. Los SKUs se
+        bloquean en orden de id, para no pisar lo que mueven las ventas al
+        mismo tiempo. Un SKU inexistente o eliminado responde 422; si algún
+        stock quedaría negativo, 409 con stock_actual y no se guarda nada. En
+        un CONTEO, los SKUs cuyo stock ya coincide no dejan movimiento.
         """
-        sku = await SkuRepository(db_session).get_by_id(data.sku_id, for_update=True)
-        if sku is None:
-            raise cls._validation_error("sku_id", "El SKU no existe.")
+        skus = {
+            sku.id: sku
+            for sku in await SkuRepository(db_session).list_active_by_ids(
+                [item.sku_id for item in data.items],
+                for_update=True,
+            )
+        }
+        for index, item in enumerate(data.items):
+            if item.sku_id not in skus:
+                raise cls._validation_error(f"items -> {index} -> sku_id", "El SKU no existe.")
 
-        movimiento = cls.registrar(
-            db_session,
-            sku,
-            data.tipo,
-            data.cantidad,
-            actor_id,
-            utc_now(),
-            costo_unitario=data.costo_unitario,
-            motivo=data.motivo,
-        )
-        await cls._commit(db_session)
+        now = utc_now()
+        movimiento_ids: list[UUID] = []
+        sin_diferencia: list[UUID] = []
+        for index, item in enumerate(data.items):
+            sku = skus[item.sku_id]
+            cantidad = cls._cantidad(data, index, int(sku.stock.get("cantidad", 0)))
+            if cantidad == 0:
+                sin_diferencia.append(sku.id)
+                continue
+            movimiento = cls.registrar(
+                db_session,
+                sku,
+                TipoMovimiento.AJUSTE,
+                cantidad,
+                actor_id,
+                now,
+                costo_unitario=item.costo_unitario,
+                motivo=data.motivo,
+                nota=data.nota,
+                field_name=f"items -> {index}",
+            )
+            movimiento_ids.append(movimiento.id)
 
+        if movimiento_ids:
+            await cls._commit(db_session)
         logger.info(
-            "Movimiento de inventario: movimiento_id=%s sku_id=%s tipo=%s cantidad=%s saldo=%s actor_id=%s",
-            movimiento.id,
-            sku.id,
-            movimiento.tipo,
-            movimiento.cantidad,
-            movimiento.saldo,
+            "Ajuste de inventario: motivo=%s movimientos=%s sin_diferencia=%s actor_id=%s",
+            data.motivo,
+            len(movimiento_ids),
+            len(sin_diferencia),
             actor_id,
         )
-        movimiento_id = movimiento.id
         db_session.expire_all()
-        return await cls.get(db_session, movimiento_id, load_detail=True)
+        movimientos = await MovimientoInventarioRepository(db_session).list_by_ids(movimiento_ids)
+        return AjusteInventarioResultado(
+            motivo=data.motivo,
+            movimientos=[MovimientoInventarioListItem.model_validate(m) for m in movimientos],
+            sin_diferencia=sin_diferencia,
+        )

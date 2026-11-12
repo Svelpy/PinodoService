@@ -211,40 +211,13 @@ def test_sugerir_codigo_barras_exige_permiso_de_crear_skus(
     assert client.post("/skus/sugerir-codigo-barras").status_code == 403
 
 
-def test_patch_stock_pasa_el_actor_y_responde_el_detail(
-    route_context: tuple[TestClient, CurrentUser, MagicMock],
-) -> None:
-    client, current_user, db_session = route_context
-    sku = Sku(
-        producto_color_id=uuid4(),
-        talla_id=uuid4(),
-        precio={"normal": 29.95, "rebajado": None, "rebaja_hasta": None},
-        stock={"cantidad": 8, "minimo": 2, "actualizado": None},
-    )
-
-    with patch.object(
-        SkuService,
-        "update_stock",
-        new=AsyncMock(return_value=SimpleNamespace(**sku.model_dump(), talla=Talla(etiqueta="M"))),
-    ) as service:
-        response = client.patch(f"/skus/{sku.id}/stock", json={"minimo": 3})
-
-    assert response.status_code == 200
-    assert "costo" not in response.json()
-    assert service.await_args.args[0] is db_session
-    assert service.await_args.args[2].minimo == 3
-    assert service.await_args.args[3] == current_user.id
-    assert response.json()["stock"]["cantidad"] == 8
-
-
-def test_patch_stock_no_acepta_cantidad(
+def test_ya_no_existe_patch_del_stock(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
     client, _, _ = route_context
 
-    for body in ({"cantidad": 9}, {"ajuste": 3}):
-        response = client.patch(f"/skus/{uuid4()}/stock", json=body)
-        assert response.status_code == 422
+    # El mínimo se edita en PATCH /producto-colores/{id}; la cantidad, con ajustes del kardex.
+    assert client.patch(f"/skus/{uuid4()}/stock", json={"minimo": 3}).status_code == 404
 
 
 def test_ya_no_existe_patch_del_sku(

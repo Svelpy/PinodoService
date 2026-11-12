@@ -10,14 +10,15 @@ from app.core.database import get_db
 from app.domains.auth.dependencies import require_permission
 from app.domains.auth.schemas import CurrentUser
 from app.domains.movimientos_inventario.schemas import (
-    MovimientoInventarioCreate,
+    AjusteInventarioCreate,
+    AjusteInventarioResultado,
     MovimientoInventarioDetail,
     MovimientoInventarioListItem,
     MovimientoInventarioResponseAudit,
     SkuCosto,
 )
 from app.domains.movimientos_inventario.services import MovimientoInventarioService
-from app.shared.enums import Action, Module, TipoMovimiento
+from app.shared.enums import Action, Module, MotivoAjuste, TipoMovimiento
 from app.shared.schemas.errors import ErrorResponse
 from app.shared.schemas.pagination import PaginatedResponse
 
@@ -39,30 +40,33 @@ def _error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
 
 
 @router.post(
-    "/",
-    response_model=MovimientoInventarioDetail,
+    "/ajustes",
+    response_model=AjusteInventarioResultado,
     status_code=status.HTTP_201_CREATED,
-    summary="Registrar ingreso o ajuste de stock",
+    summary="Ajustar stock",
     description=(
-        "INGRESO: entra mercadería; cantidad positiva y costo_unitario "
-        "obligatorio; recalcula el costo promedio del SKU. AJUSTE: merma, "
-        "conteo físico o regalo; cantidad positiva o negativa y motivo "
-        "obligatorio; no cambia el costo. Un movimiento no se edita ni se "
-        "elimina: un error se corrige con otro AJUSTE. 409 con stock_actual en "
-        "details si el stock quedaría negativo. Las ventas pendientes no "
-        "reservan stock."
+        "Ajuste manual de uno o varios SKUs con un mismo motivo, en una sola "
+        "transacción: se aplica a todos o a ninguno. Por motivo, cada ítem envía: "
+        "RECEPCION, cantidad (> 0) y costo_unitario, y recalcula el costo "
+        "promedio; CONTEO, cantidad_contada (lo que hay en el estante) y se "
+        "registra la diferencia; MERMA y ROBO_PERDIDA, cantidad (> 0, las "
+        "unidades que salen); CORRECCION, cantidad positiva o negativa, con nota "
+        "obligatoria. Cada SKU que cambia deja un movimiento AJUSTE; un "
+        "movimiento no se edita ni se elimina, un error se corrige con otra "
+        "CORRECCION. 422 si un SKU no existe; 409 con stock_actual en details si "
+        "algún stock quedaría negativo. Las ventas pendientes no reservan stock."
     ),
     responses=_error_responses(401, 403, 409, 422, 500),
 )
-async def create_movimiento_inventario(
-    data: MovimientoInventarioCreate,
+async def ajustar_stock(
+    data: AjusteInventarioCreate,
     current_user: Annotated[
         CurrentUser,
         Depends(require_permission(Module.MOVIMIENTO_INVENTARIO, Action.CREATE)),
     ],
     db_session: Annotated[AsyncSession, Depends(get_db)],
-) -> MovimientoInventarioDetail:
-    return await MovimientoInventarioService.create(db_session, data, current_user.id)
+) -> AjusteInventarioResultado:
+    return await MovimientoInventarioService.ajustar(db_session, data, current_user.id)
 
 
 @router.get(
@@ -71,8 +75,9 @@ async def create_movimiento_inventario(
     summary="Listar movimientos de inventario (kardex)",
     description=(
         "Del más reciente al más antiguo. Con sku_id es el kardex de ese SKU: "
-        "saldo es el stock que dejó cada movimiento. desde y hasta son fechas "
-        "de la tienda, ambas incluidas."
+        "saldo es el stock que dejó cada movimiento. motivo filtra los AJUSTE "
+        "(por ejemplo, las mermas del mes). desde y hasta son fechas de la "
+        "tienda, ambas incluidas."
     ),
     responses=_error_responses(401, 403, 422, 500),
 )
@@ -87,6 +92,7 @@ async def list_movimientos_inventario(
     per_page: Annotated[int, Query(ge=1, le=100)] = 20,
     sku_id: Annotated[UUID | None, Query()] = None,
     tipo: Annotated[TipoMovimiento | None, Query()] = None,
+    motivo: Annotated[MotivoAjuste | None, Query()] = None,
     venta_id: Annotated[UUID | None, Query()] = None,
     created_by: Annotated[UUID | None, Query()] = None,
     desde: Annotated[date | None, Query()] = None,
@@ -99,6 +105,7 @@ async def list_movimientos_inventario(
         per_page=per_page,
         sku_id=sku_id,
         tipo=tipo,
+        motivo=motivo,
         venta_id=venta_id,
         created_by=created_by,
         desde=desde,

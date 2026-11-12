@@ -426,7 +426,6 @@ class VentaService:
                 -item.cantidad,
                 actor_id,
                 now,
-                motivo="Venta confirmada",
                 venta_id=venta.id,
                 field_name="items",
             )
@@ -458,7 +457,6 @@ class VentaService:
                 actor_id,
                 now,
                 costo_unitario=item.costo_unitario,
-                motivo="Venta anulada",
                 venta_id=venta.id,
             )
 

@@ -130,11 +130,18 @@ def test_patch_rechaza_null(campo: str) -> None:
         ProductoColorUpdate.model_validate({campo: None})
 
 
-def test_fila_existente_no_admite_stock_y_la_nueva_si() -> None:
-    with pytest.raises(ValidationError, match="POST /movimientos-inventario/"):
-        SkuDetailUpdate.model_validate(
-            {"id": str(uuid4()), "talla_id": str(uuid4()), "precio": PRECIO, "stock": {"cantidad": 1}}
-        )
+def test_fila_existente_no_admite_cantidad_y_la_nueva_si() -> None:
+    for stock in ({"cantidad": 1}, {"cantidad": 1, "minimo": 2}):
+        with pytest.raises(ValidationError, match="POST /movimientos-inventario/ajustes"):
+            SkuDetailUpdate.model_validate(
+                {"id": str(uuid4()), "talla_id": str(uuid4()), "precio": PRECIO, "stock": stock}
+            )
+    with pytest.raises(ValidationError, match="solo admite minimo"):
+        SkuDetailUpdate.model_validate({"id": str(uuid4()), "talla_id": str(uuid4()), "precio": PRECIO, "stock": {}})
+    con_minimo = SkuDetailUpdate.model_validate(
+        {"id": str(uuid4()), "talla_id": str(uuid4()), "precio": PRECIO, "stock": {"minimo": 4}}
+    )
+    assert con_minimo.stock.minimo == 4
 
     nueva = SkuDetailUpdate.model_validate({"talla_id": str(uuid4()), "precio": PRECIO})
     assert nueva.id is None and nueva.stock is None
