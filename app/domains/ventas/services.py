@@ -23,8 +23,8 @@ from app.domains.venta_pagos.schemas import VentaPagoDetailCreate
 from app.domains.ventas.models import Venta
 from app.domains.ventas.repositories import VentaRepository, VentaScope
 from app.domains.ventas.schemas import (
+    VentaConfirmar,
     VentaCreate,
-    VentaEstadoUpdate,
     VentaItemsUpdate,
     VentaPaginatedResponse,
     VentaResumen,
@@ -52,9 +52,10 @@ class VentaService:
     - El stock se descuenta al confirmar (o al crear la venta ya confirmada) y
       se devuelve al anular una venta confirmada, siempre con movimientos del
       kardex. Al confirmar, cada ítem copia el costo promedio de su SKU.
-    - Los pagos nunca superan el total, y confirmar exige que lo cubran
-      exactamente (no hay fiado). Un pago no se anula: cancelar la venta
-      devuelve todos sus pagos y total_pagado queda como lo devuelto.
+    - Sin anticipos ni fiado: una venta PENDIENTE no tiene pagos, y los pagos
+      se registran todos juntos al cobrarla (al crearla o al confirmarla),
+      cubriendo exactamente el total. Un pago no se anula: anular una venta
+      confirmada devuelve todos sus pagos y total_pagado queda como lo devuelto.
     - Una venta nunca se elimina: se cancela.
     """
 
@@ -192,26 +193,26 @@ class VentaService:
 
     @staticmethod
     def _resumen(
-        totales: dict[EstadoVenta, tuple[Decimal, Decimal]],
+        totales: dict[EstadoVenta, Decimal],
         pagos_confirmadas: dict[MetodoPago, Decimal],
     ) -> VentaResumen:
         cero = Decimal("0")
 
         def total(estado: EstadoVenta) -> Decimal:
-            return totales.get(estado, (cero, cero))[0]
-
-        def pagado(estado: EstadoVenta) -> Decimal:
-            return totales.get(estado, (cero, cero))[1]
+            return totales.get(estado, cero)
 
         return VentaResumen(
             confirmada=VentaResumenConfirmada(
                 efectivo=pagos_confirmadas.get(MetodoPago.EFECTIVO, cero),
+                tarjeta=pagos_confirmadas.get(MetodoPago.TARJETA, cero),
+                cheque=pagos_confirmadas.get(MetodoPago.CHEQUE, cero),
+                vales=pagos_confirmadas.get(MetodoPago.VALES, cero),
+                otros=pagos_confirmadas.get(MetodoPago.OTROS, cero),
                 qr=pagos_confirmadas.get(MetodoPago.QR, cero),
                 transferencia=pagos_confirmadas.get(MetodoPago.TRANSFERENCIA, cero),
                 total=total(EstadoVenta.CONFIRMADA),
             ),
             pendiente=total(EstadoVenta.PENDIENTE),
-            pendiente_pagado=pagado(EstadoVenta.PENDIENTE),
             cancelada=total(EstadoVenta.CANCELADA),
         )
 
@@ -343,12 +344,11 @@ class VentaService:
         pagos: Sequence[VentaPagoDetailCreate],
         actor: CurrentUser,
         now: datetime,
-        *,
-        field_name: str = "pagos",
     ) -> list[VentaPago]:
         """
-        Registra pagos de la venta y los suma a total_pagado. Entre todos no
-        pueden superar el saldo por cobrar. No hace commit.
+        Registra los pagos de la venta y los suma a total_pagado. Entre todos no
+        pueden superar el total; que lo cubran exacto lo exige _exigir_pagada.
+        No hace commit.
         """
         if not pagos:
             return []
@@ -357,7 +357,7 @@ class VentaService:
         if monto > saldo:
             raise cls._conflict(
                 f"Los pagos ({monto}) superan el saldo por cobrar de la venta ({max(saldo, Decimal('0'))}).",
-                field_name,
+                "pagos",
             )
 
         repository = VentaPagoRepository(db_session)
@@ -371,8 +371,7 @@ class VentaService:
                 created_by=actor.id,
                 updated_at=created_at,
                 updated_by=actor.id,
-                # Solo los campos del pago: un VentaPagoCreate también trae venta_id.
-                **data.model_dump(include=set(VentaPagoDetailCreate.model_fields)),
+                **data.model_dump(),
             )
             repository.add(pago)
             nuevos.append(pago)
@@ -380,22 +379,13 @@ class VentaService:
         return nuevos
 
     @classmethod
-    def _validar_pagado_hasta_total(cls, venta: Venta) -> None:
-        """Un pago no se anula: el total de la venta no puede bajar de lo ya pagado."""
-        if venta.total < venta.total_pagado:
-            raise cls._conflict(
-                f"El nuevo total de la venta ({venta.total}) es menor que lo ya pagado "
-                f"({venta.total_pagado}). Un pago no se anula: mantén el total o cancela la venta.",
-                "items",
-            )
-
-    @classmethod
     def _exigir_pagada(cls, venta: Venta) -> None:
-        """Sin fiado: una venta solo se confirma pagada completa."""
+        """Sin anticipos ni fiado: los pagos de una venta cubren su total exacto."""
         if venta.total_pagado < venta.total:
             raise cls._conflict(
                 f"Falta cobrar {venta.total - venta.total_pagado}: los pagos "
-                f"({venta.total_pagado}) no cubren el total de la venta ({venta.total}).",
+                f"({venta.total_pagado}) no cubren el total de la venta ({venta.total}). "
+                "No se admiten pagos parciales.",
                 "pagos",
             )
 
@@ -489,19 +479,24 @@ class VentaService:
         settings: Settings,
     ) -> Venta:
         """
-        Crea la venta con sus ítems y sus pagos. Si llega CONFIRMADA (venta de
-        mostrador), los pagos deben cubrir el total y descuenta el stock en la
-        misma transacción. Si llega PENDIENTE, los pagos son anticipos.
+        Crea la venta con sus ítems. Su estado depende de los pagos: sin pagos
+        queda PENDIENTE y no toca el stock; con pagos que cubren el total
+        exacto queda CONFIRMADA (venta de mostrador) y descuenta el stock en la
+        misma transacción. Pagos parciales o mayores al total responden 409.
         """
-        confirmar = data.estado == EstadoVenta.CONFIRMADA
+        confirmar = bool(data.pagos)
         sku_ids = [item.sku_id for item in data.items]
         skus = await cls._skus_para_venta(db_session, sku_ids, for_update=confirmar)
         today = SkuService.local_today(settings)
         now = utc_now()
 
+        # El mismo instante que sus ítems, pagos, movimientos y confirmada_at.
         venta = Venta(
             **data.model_dump(exclude={"items", "pagos"}),
+            estado=EstadoVenta.CONFIRMADA if confirmar else EstadoVenta.PENDIENTE,
+            created_at=now,
             created_by=actor.id,
+            updated_at=now,
             updated_by=actor.id,
         )
         items = [
@@ -575,7 +570,6 @@ class VentaService:
         for field_name, value in datos_venta.items():
             setattr(venta, field_name, value)
         cls._aplicar_totales(venta, subtotales)
-        cls._validar_pagado_hasta_total(venta)
         venta.updated_at = now
         venta.updated_by = actor.id
 
@@ -599,91 +593,117 @@ class VentaService:
         return await cls._reload(db_session, venta_id, actor)
 
     @classmethod
-    async def change_estado(
+    async def confirmar(
         cls,
         db_session: AsyncSession,
         venta_id: UUID,
-        data: VentaEstadoUpdate,
+        data: VentaConfirmar,
         actor: CurrentUser,
         settings: Settings,
     ) -> Venta:
         """
-        PENDIENTE → CONFIRMADA cobra la venta y descuenta el stock. Por defecto
-        la cobra como una proforma, tal como se ofreció; con recalcular_precios
-        antes rehace el snapshot y los precios de cada ítem con su SKU actual,
-        igual que PUT /items (conserva cantidades y descuentos), y recalcula
-        los totales. Los pagos enviados se suman a los anticipos y, entre
-        todos, deben cubrir exactamente el total. PENDIENTE → CANCELADA no toca
-        el stock; CONFIRMADA → CANCELADA lo devuelve y exige la acción DELETE
-        de ventas (anular una venta cobrada). Cancelar no recalcula nada ni
-        toca los pagos: se devuelven todos. CANCELADA es definitiva.
+        Cobra una venta PENDIENTE y descuenta el stock. Por defecto la cobra
+        como una proforma, tal como se ofreció; con recalcular_precios antes
+        rehace el snapshot y los precios de cada ítem con su SKU actual, igual
+        que PUT /items (conserva cantidades y descuentos), y recalcula los
+        totales. Los pagos, que pueden ser mixtos, deben cubrir exactamente el
+        total: sin anticipos ni fiado.
         """
         venta = await cls.get(db_session, venta_id, actor, for_update=True, load_detail=True)
-        destino = data.estado
-        if venta.estado == EstadoVenta.CANCELADA:
-            raise cls._conflict("La venta ya está cancelada.", "estado")
-        if venta.estado == destino:
-            raise cls._conflict("La venta ya está confirmada.", "estado")
+        if venta.estado != EstadoVenta.PENDIENTE:
+            raise cls._conflict(
+                f"Solo se confirman ventas pendientes; esta venta está {venta.estado.value}.",
+                "estado",
+            )
 
         now = utc_now()
-        cantidades = {item.sku_id: item.cantidad for item in venta.items}
-        item_repository = VentaItemRepository(db_session)
-
-        if destino == EstadoVenta.CONFIRMADA:
-            skus = await item_repository.get_skus_para_venta(list(cantidades), for_update=True)
-            eliminados = [item for item in venta.items if item.sku_id not in skus]
-            if eliminados:
-                nombres = ", ".join(
-                    f"{item.producto_nombre} {item.color_nombre} {item.talla_etiqueta}"
-                    for item in eliminados
+        skus = await VentaItemRepository(db_session).get_skus_para_venta(
+            [item.sku_id for item in venta.items],
+            for_update=True,
+        )
+        eliminados = [item for item in venta.items if item.sku_id not in skus]
+        if eliminados:
+            nombres = ", ".join(
+                f"{item.producto_nombre} {item.color_nombre} {item.talla_etiqueta}" for item in eliminados
+            )
+            raise cls._conflict(
+                f"Estos productos fueron eliminados del catálogo: {nombres}. "
+                "Quítalos con PUT /ventas/{id}/items antes de confirmar.",
+                "items",
+            )
+        if data.recalcular_precios:
+            # Se cobra con el catálogo de hoy: precios, rebajas vigentes y nombres.
+            today = SkuService.local_today(settings)
+            subtotales: list[Decimal] = []
+            for item in venta.items:
+                datos = VentaItemCreate(
+                    sku_id=item.sku_id,
+                    cantidad=item.cantidad,
+                    descuento_unitario=item.descuento_unitario,
                 )
-                raise cls._conflict(
-                    f"Estos productos fueron eliminados del catálogo: {nombres}. "
-                    "Quítalos con PUT /ventas/{id}/items antes de confirmar.",
-                    "items",
-                )
-            if data.recalcular_precios:
-                # Se cobra con el catálogo de hoy: precios, rebajas vigentes y nombres.
-                today = SkuService.local_today(settings)
-                subtotales: list[Decimal] = []
-                for item in venta.items:
-                    datos = VentaItemCreate(
-                        sku_id=item.sku_id,
-                        cantidad=item.cantidad,
-                        descuento_unitario=item.descuento_unitario,
-                    )
-                    valores = cls._valores_item(datos, skus[item.sku_id], today)
-                    cls._actualizar_item(item, valores, actor, now)
-                    subtotales.append(valores["subtotal"])
-                cls._aplicar_totales(venta, subtotales)
-                cls._validar_pagado_hasta_total(venta)
-            cls.agregar_pagos(db_session, venta, data.pagos, actor, now)
-            cls._exigir_pagada(venta)
-            cls._descontar_stock(db_session, venta, venta.items, skus, actor.id, now)
-            venta.confirmada_at = now
-        else:
-            if venta.estado == EstadoVenta.CONFIRMADA:
-                if not has_permission(actor.rol, Module.VENTA, Action.DELETE):
-                    raise AppException(
-                        "No tienes permisos para anular una venta confirmada.",
-                        403,
-                        ErrorCode.PERMISSION_DENIED,
-                    )
-                skus = await item_repository.get_skus_para_venta(list(cantidades), for_update=True)
-                cls._devolver_stock(db_session, venta, venta.items, skus, actor.id, now)
-            venta.cancelada_at = now
-
-        estado_anterior = venta.estado
-        venta.estado = destino
+                valores = cls._valores_item(datos, skus[item.sku_id], today)
+                cls._actualizar_item(item, valores, actor, now)
+                subtotales.append(valores["subtotal"])
+            cls._aplicar_totales(venta, subtotales)
+        cls.agregar_pagos(db_session, venta, data.pagos, actor, now)
+        cls._exigir_pagada(venta)
+        cls._descontar_stock(db_session, venta, venta.items, skus, actor.id, now)
+        venta.estado = EstadoVenta.CONFIRMADA
+        venta.confirmada_at = now
         venta.updated_at = now
         venta.updated_by = actor.id
         await cls._commit(db_session)
 
         logger.info(
-            "Estado de venta cambiado: venta_id=%s %s -> %s actor_id=%s",
+            "Venta confirmada: venta_id=%s pagos=%s actor_id=%s",
+            venta_id,
+            len(data.pagos),
+            actor.id,
+        )
+        return await cls._reload(db_session, venta_id, actor)
+
+    @classmethod
+    async def cancelar(
+        cls,
+        db_session: AsyncSession,
+        venta_id: UUID,
+        actor: CurrentUser,
+    ) -> Venta:
+        """
+        Cancela una venta. Una PENDIENTE no tiene pagos ni movió stock. Anular
+        una CONFIRMADA devuelve su stock y todos sus pagos (total_pagado queda
+        como lo devuelto) y exige además la acción DELETE de ventas. No
+        recalcula nada. CANCELADA es definitiva.
+        """
+        venta = await cls.get(db_session, venta_id, actor, for_update=True, load_detail=True)
+        if venta.estado == EstadoVenta.CANCELADA:
+            raise cls._conflict("La venta ya está cancelada.", "estado")
+
+        now = utc_now()
+        if venta.estado == EstadoVenta.CONFIRMADA:
+            if not has_permission(actor.rol, Module.VENTA, Action.DELETE):
+                raise AppException(
+                    "No tienes permisos para anular una venta confirmada.",
+                    403,
+                    ErrorCode.PERMISSION_DENIED,
+                )
+            skus = await VentaItemRepository(db_session).get_skus_para_venta(
+                [item.sku_id for item in venta.items],
+                for_update=True,
+            )
+            cls._devolver_stock(db_session, venta, venta.items, skus, actor.id, now)
+
+        estado_anterior = venta.estado
+        venta.estado = EstadoVenta.CANCELADA
+        venta.cancelada_at = now
+        venta.updated_at = now
+        venta.updated_by = actor.id
+        await cls._commit(db_session)
+
+        logger.info(
+            "Venta cancelada: venta_id=%s estado_anterior=%s actor_id=%s",
             venta_id,
             estado_anterior,
-            destino,
             actor.id,
         )
         return await cls._reload(db_session, venta_id, actor)

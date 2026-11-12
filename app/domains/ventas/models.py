@@ -15,7 +15,8 @@ class Venta(BaseModel, table=True):
     """
     Venta registrada por un usuario de la tienda (created_by), sin cliente
     registrado ni pasarela de pagos. Se cobra con uno o varios VentaPago
-    (pagos mixtos y anticipos); confirmarla exige que esté pagada completa.
+    (pagos mixtos) que cubren exactamente su total, todos juntos al
+    confirmarla: una venta pendiente no tiene pagos (sin anticipos ni fiado).
     """
 
     __tablename__ = "ventas"
@@ -35,15 +36,17 @@ class Venta(BaseModel, table=True):
             "estado <> 'CONFIRMADA' OR total_pagado = total",
             name="ck_ventas_confirmada_pagada",
         ),
+        # Sin anticipos: una venta pendiente no tiene pagos.
+        CheckConstraint(
+            "estado <> 'PENDIENTE' OR total_pagado = 0",
+            name="ck_ventas_pendiente_sin_pagos",
+        ),
         {"schema": "public"},
     )
 
     # Número legible (#1, #2...). Lo genera PostgreSQL; nunca se envía en un INSERT.
-    numero: int | None = Field(
-        default=None,
-        sa_column=Column(BigInteger, Identity(always=True, start=1), nullable=False),
-    )
-    canal: CanalVenta = Field(default=CanalVenta.WHATSAPP,sa_type=SQLAlchemyEnum(CanalVenta,name="canal_venta",native_enum=False,create_constraint=True,length=20,),nullable=False,)
+    numero: int | None = Field(default=None,sa_column=Column(BigInteger, Identity(always=True, start=1), nullable=False))
+    canal: CanalVenta = Field(default=CanalVenta.PAGINA_WEB,sa_type=SQLAlchemyEnum(CanalVenta,name="canal_venta",native_enum=False,create_constraint=True,length=20,),nullable=False,)
     estado: EstadoVenta = Field(default=EstadoVenta.PENDIENTE,sa_type=SQLAlchemyEnum(EstadoVenta,name="estado_venta",native_enum=False,create_constraint=True,length=20,),nullable=False,)
     referencia: str | None = Field(default=None, max_length=150, nullable=True)
     cliente_telefono: str | None = Field(default=None, max_length=20, nullable=True)
@@ -58,16 +61,6 @@ class Venta(BaseModel, table=True):
     cancelada_at: datetime | None = Field(default=None,sa_type=DateTime(timezone=True),nullable=True)
 
     # Los repositories la cargan filtrando los ítems eliminados.
-    items: list[VentaItem] = Relationship(
-        sa_relationship_kwargs={
-            "lazy": "raise",
-            "order_by": "(VentaItem.created_at, VentaItem.id)",
-        }
-    )
+    items: list[VentaItem] = Relationship(sa_relationship_kwargs={"lazy": "raise","order_by": "(VentaItem.created_at, VentaItem.id)"})
     # Los repositories la cargan filtrando los pagos eliminados.
-    pagos: list[VentaPago] = Relationship(
-        sa_relationship_kwargs={
-            "lazy": "raise",
-            "order_by": "(VentaPago.created_at, VentaPago.id)",
-        }
-    )
+    pagos: list[VentaPago] = Relationship(sa_relationship_kwargs={"lazy": "raise","order_by": "(VentaPago.created_at, VentaPago.id)"})

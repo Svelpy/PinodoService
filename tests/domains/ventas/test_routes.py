@@ -78,7 +78,11 @@ def test_create_pasa_el_actor_y_responde_detail(
     with patch.object(VentaService, "create", new=AsyncMock(return_value=venta)) as service:
         response = client.post(
             "/ventas/",
-            json={"estado": "CONFIRMADA", "canal": "TIENDA", "items": [{"sku_id": str(uuid4()), "cantidad": 2}]},
+            json={
+                "canal": "TIENDA",
+                "items": [{"sku_id": str(uuid4()), "cantidad": 2}],
+                "pagos": [{"metodo": "EFECTIVO", "monto": 39.9}],
+            },
         )
 
     assert response.status_code == 201
@@ -89,7 +93,7 @@ def test_create_pasa_el_actor_y_responde_detail(
     assert body["items"][0]["precio_unitario"] == 19.95
     args = service.await_args.args
     assert args[0] is db_session
-    assert args[1].estado == EstadoVenta.CONFIRMADA
+    assert [pago.monto for pago in args[1].pagos] == [Decimal("39.9")]
     assert args[2] == current_user
 
 
@@ -99,7 +103,7 @@ def test_create_rechaza_cuerpo_invalido(
     client, _, _ = route_context
 
     with patch.object(VentaService, "create", new=AsyncMock()) as service:
-        response = client.post("/ventas/", json={"estado": "CANCELADA", "items": []})
+        response = client.post("/ventas/", json={"estado": "CONFIRMADA", "items": []})
 
     assert response.status_code == 422
     service.assert_not_awaited()
@@ -117,9 +121,17 @@ def test_list_pasa_filtros_y_actor(
         total_pages=1,
         data=[_venta()],
         resumen=VentaResumen(
-            confirmada=VentaResumenConfirmada(efectivo=cero, qr=cero, transferencia=cero, total=cero),
+            confirmada=VentaResumenConfirmada(
+                efectivo=cero,
+                tarjeta=cero,
+                cheque=cero,
+                vales=cero,
+                otros=cero,
+                qr=cero,
+                transferencia=cero,
+                total=cero,
+            ),
             pendiente=Decimal("39.90"),
-            pendiente_pagado=cero,
             cancelada=cero,
         ),
     )
@@ -205,35 +217,53 @@ def test_put_items_llama_al_service(
     assert args[3] == current_user
 
 
-def test_patch_estado_llama_al_service(
+def test_confirmar_llama_al_service(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
     client, current_user, db_session = route_context
     venta = _venta()
 
-    with patch.object(VentaService, "change_estado", new=AsyncMock(return_value=venta)) as service:
-        response = client.patch(f"/ventas/{venta.id}/estado", json={"estado": "CONFIRMADA"})
+    with patch.object(VentaService, "confirmar", new=AsyncMock(return_value=venta)) as service:
+        response = client.post(
+            f"/ventas/{venta.id}/confirmar",
+            json={"pagos": [{"metodo": "EFECTIVO", "monto": 20}, {"metodo": "QR", "monto": 19.9}]},
+        )
 
     assert response.status_code == 200
     args = service.await_args.args
     assert args[:2] == (db_session, venta.id)
-    assert args[2].estado == EstadoVenta.CONFIRMADA
+    assert [pago.metodo for pago in args[2].pagos] == [MetodoPago.EFECTIVO, MetodoPago.QR]
     assert args[3] == current_user
 
 
-def test_patch_estado_rechaza_pendiente(
+def test_confirmar_rechaza_estado_en_el_cuerpo(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
 ) -> None:
     client, _, _ = route_context
 
-    response = client.patch(f"/ventas/{uuid4()}/estado", json={"estado": "PENDIENTE"})
+    with patch.object(VentaService, "confirmar", new=AsyncMock()) as service:
+        response = client.post(f"/ventas/{uuid4()}/confirmar", json={"estado": "CONFIRMADA"})
 
     assert response.status_code == 422
+    service.assert_not_awaited()
+
+
+def test_cancelar_llama_al_service_sin_cuerpo(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, current_user, db_session = route_context
+    venta = _venta()
+
+    with patch.object(VentaService, "cancelar", new=AsyncMock(return_value=venta)) as service:
+        response = client.post(f"/ventas/{venta.id}/cancelar")
+
+    assert response.status_code == 200
+    service.assert_awaited_once_with(db_session, venta.id, current_user)
 
 
 @pytest.mark.parametrize(
     ("method", "path"),
-    [("patch", "/ventas/{id}"), ("delete", "/ventas/{id}")],
+    [("patch", "/ventas/{id}"), ("delete", "/ventas/{id}"), ("patch", "/ventas/{id}/estado")],
 )
 def test_no_existen_patch_ni_delete(
     route_context: tuple[TestClient, CurrentUser, MagicMock],
@@ -244,4 +274,4 @@ def test_no_existen_patch_ni_delete(
 
     response = getattr(client, method)(path.format(id=uuid4()))
 
-    assert response.status_code == 405
+    assert response.status_code in {404, 405}

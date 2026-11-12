@@ -1,7 +1,10 @@
 """
-Un pago se registra y no se anula: la devolución se hace cancelando la venta
-completa. Por eso no hay DELETE, y PATCH solo cambia la referencia; el monto y
-el método no se corrigen. El comprobante se sube con su propio endpoint.
+Los pagos no tienen create propio: se envían todos juntos con su venta, al
+crearla (POST /ventas/) o al confirmarla (POST /ventas/{id}/confirmar), y
+cubren exactamente su total; no hay anticipos. Un pago no se edita ni se
+anula: la devolución se hace anulando la venta. Los pagos se consultan desde
+su venta, que los embebe como VentaPagoDetail. El comprobante se sube con su
+propio endpoint.
 """
 
 from datetime import datetime
@@ -24,9 +27,9 @@ def _validate_referencia(value: object) -> str | None:
 
 class VentaPagoDetailCreate(BaseModel):
     """
-    Pago enviado junto con su venta (POST /ventas/ o al confirmarla), sin
-    venta_id: lo asigna el service. monto es lo aplicado a la venta; en
-    efectivo no incluye el vuelto.
+    Pago enviado junto con su venta (POST /ventas/ o POST
+    /ventas/{id}/confirmar), sin venta_id: lo asigna el service. monto es lo
+    aplicado a la venta; en efectivo no incluye el vuelto.
     """
 
     metodo: MetodoPago = Field(...)
@@ -61,45 +64,6 @@ class VentaPagoDetailCreate(BaseModel):
                 "referencia": "0048213",
             }
         },
-    )
-
-
-class VentaPagoCreate(VentaPagoDetailCreate):
-    """Entrada de POST /venta-pagos/: un pago más para una venta pendiente."""
-
-    venta_id: UUID = Field(...)
-
-    @field_validator("venta_id")
-    @classmethod
-    def validate_venta_id(cls, value: UUID | None) -> UUID:
-        if value is None:
-            raise ValueError("La venta no puede ser null.")
-        return value
-
-    model_config = ConfigDict(
-        extra="forbid",
-        json_schema_extra={
-            "example": {
-                **VentaPagoDetailCreate.model_config["json_schema_extra"]["example"],
-                "venta_id": "66666666-6666-4666-8666-666666666666",
-            }
-        },
-    )
-
-
-class VentaPagoUpdate(BaseModel):
-    """Entrada de PATCH /venta-pagos/{id}. referencia acepta null para quitarla."""
-
-    referencia: str | None = Field(default=None, min_length=1, max_length=100)
-
-    @field_validator("referencia", mode="before")
-    @classmethod
-    def validate_referencia(cls, value: object) -> str | None:
-        return _validate_referencia(value)
-
-    model_config = ConfigDict(
-        extra="forbid",
-        json_schema_extra={"example": {"referencia": "0048213"}},
     )
 
 

@@ -7,8 +7,8 @@ from pydantic import ValidationError
 from app.domains.ventas.schemas import (
     MAX_ITEMS_POR_VENTA,
     VentaCreate,
+    VentaConfirmar,
     VentaDetail,
-    VentaEstadoUpdate,
     VentaItemsUpdate,
     VentaResponse,
     VentaResponseAudit,
@@ -28,8 +28,7 @@ def _pago(**overrides: object) -> dict[str, object]:
 def test_venta_create_valores_por_defecto() -> None:
     venta = VentaCreate.model_validate({"items": [_item()]})
 
-    assert venta.estado == EstadoVenta.PENDIENTE
-    assert venta.canal == CanalVenta.WHATSAPP
+    assert venta.canal == CanalVenta.PAGINA_WEB
     assert venta.pagos == []
     assert venta.descuento == Decimal("0")
     assert venta.referencia is None
@@ -37,12 +36,10 @@ def test_venta_create_valores_por_defecto() -> None:
     assert venta.nota is None
 
 
-def test_venta_create_acepta_confirmada_para_mostrador() -> None:
-    venta = VentaCreate.model_validate(
-        {"estado": "CONFIRMADA", "canal": "TIENDA", "items": [_item()]}
-    )
-
-    assert venta.estado == EstadoVenta.CONFIRMADA
+def test_venta_create_no_acepta_estado() -> None:
+    # El estado lo deciden los pagos: sin pagos PENDIENTE, con pagos CONFIRMADA.
+    with pytest.raises(ValidationError):
+        VentaCreate.model_validate({"estado": "CONFIRMADA", "canal": "TIENDA", "items": [_item()]})
 
 
 def test_venta_create_normaliza_textos() -> None:
@@ -63,13 +60,12 @@ def test_venta_create_normaliza_textos() -> None:
 @pytest.mark.parametrize(
     "overrides",
     [
-        {"estado": "CANCELADA"},
-        {"estado": None},
+        {"estado": "PENDIENTE"},
         {"canal": None},
-        {"canal": "INSTAGRAM"},
+        {"canal": "BITCOIN"},
         {"metodo_pago": "QR"},
         {"pagos": None},
-        {"pagos": [_pago(metodo="TARJETA")]},
+        {"pagos": [_pago(metodo="BITCOIN")]},
         {"pagos": [_pago(monto=0)]},
         {"pagos": [_pago(monto=-5)]},
         {"pagos": [_pago(monto=None)]},
@@ -113,7 +109,6 @@ def test_items_rechaza_mas_del_maximo(schema: type) -> None:
 def test_venta_create_acepta_pagos_mixtos() -> None:
     venta = VentaCreate.model_validate(
         {
-            "estado": "CONFIRMADA",
             "items": [_item()],
             "pagos": [_pago(monto="20.50"), _pago(metodo="QR", monto=9.5, referencia=" 0048213 ")],
         }
@@ -166,38 +161,41 @@ def test_venta_items_update_exige_items() -> None:
         VentaItemsUpdate.model_validate({"nota": "Sin ítems"})
 
 
-@pytest.mark.parametrize("estado", ["CONFIRMADA", "CANCELADA"])
-def test_venta_estado_update_acepta_confirmar_y_cancelar(estado: str) -> None:
-    assert VentaEstadoUpdate.model_validate({"estado": estado}).estado == EstadoVenta(estado)
+def test_venta_confirmar_recibe_pagos_mixtos() -> None:
+    data = VentaConfirmar.model_validate({"pagos": [_pago(), _pago(metodo="QR", referencia="0048213")]})
+
+    assert [pago.metodo for pago in data.pagos] == [MetodoPago.EFECTIVO, MetodoPago.QR]
 
 
-def test_venta_estado_update_cobra_el_saldo_al_confirmar() -> None:
-    data = VentaEstadoUpdate.model_validate({"estado": "CONFIRMADA", "pagos": [_pago(metodo="QR")]})
+def test_venta_confirmar_valores_por_defecto() -> None:
+    # Sin pagos solo se confirma una venta de total 0: lo comprueba el service.
+    data = VentaConfirmar.model_validate({})
 
-    assert [pago.metodo for pago in data.pagos] == [MetodoPago.QR]
-    assert VentaEstadoUpdate.model_validate({"estado": "CONFIRMADA"}).pagos == []
+    assert data.pagos == []
+    assert data.recalcular_precios is False
 
 
 @pytest.mark.parametrize(
     "data",
     [
-        {"estado": "PENDIENTE"},
-        {"estado": None},
-        {},
-        {"estado": "CONFIRMADA", "metodo_pago": "QR"},
-        {"estado": "CONFIRMADA", "pagos": None},
-        {"estado": "CANCELADA", "pagos": []},
-        {"estado": "CANCELADA", "pagos": [_pago()]},
+        {"estado": "CONFIRMADA"},
+        {"metodo_pago": "QR"},
+        {"pagos": None},
+        {"pagos": [_pago(monto=0)]},
+        {"pagos": [_pago(metodo="BITCOIN")]},
+        {"pagos": [_pago() for _ in range(MAX_PAGOS_POR_VENTA + 1)]},
+        {"recalcular_precios": None},
+        {"recalcular_precios": "true"},
     ],
 )
-def test_venta_estado_update_rechaza_invalidos(data: dict[str, object]) -> None:
+def test_venta_confirmar_rechaza_invalidos(data: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
-        VentaEstadoUpdate.model_validate(data)
+        VentaConfirmar.model_validate(data)
 
 
 @pytest.mark.parametrize(
     "schema",
-    [VentaCreate, VentaItemsUpdate, VentaEstadoUpdate, VentaResponse, VentaResponseAudit, VentaDetail],
+    [VentaCreate, VentaItemsUpdate, VentaConfirmar, VentaResponse, VentaResponseAudit, VentaDetail],
 )
 def test_ejemplos_validan_su_schema(schema: type) -> None:
     example = schema.model_config["json_schema_extra"]["example"]
@@ -219,29 +217,3 @@ def test_ejemplo_de_detail_es_coherente() -> None:
     assert detail.estado == EstadoVenta.CANCELADA
     assert detail.confirmada_at is not None and detail.cancelada_at is not None
 
-
-# ---------------------------------------------------------------- estado
-
-
-def test_estado_update_por_defecto_no_recalcula_precios() -> None:
-    from app.domains.ventas.schemas import VentaEstadoUpdate
-
-    assert VentaEstadoUpdate.model_validate({"estado": "CONFIRMADA"}).recalcular_precios is False
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        {"estado": "CANCELADA", "recalcular_precios": True},
-        {"estado": "CANCELADA", "recalcular_precios": False},
-        {"estado": "CONFIRMADA", "recalcular_precios": None},
-        {"estado": "CONFIRMADA", "recalcular_precios": "true"},
-    ],
-)
-def test_estado_update_recalcular_solo_al_confirmar_y_booleano(body: dict[str, object]) -> None:
-    from pydantic import ValidationError
-
-    from app.domains.ventas.schemas import VentaEstadoUpdate
-
-    with pytest.raises(ValidationError):
-        VentaEstadoUpdate.model_validate(body)

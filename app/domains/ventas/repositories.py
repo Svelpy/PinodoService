@@ -150,10 +150,10 @@ class VentaRepository:
         numero: int | None = None,
         desde: datetime | None = None,
         hasta: datetime | None = None,
-    ) -> dict[EstadoVenta, tuple[Decimal, Decimal]]:
+    ) -> dict[EstadoVenta, Decimal]:
         """
-        Suma de total y de total_pagado de TODAS las ventas filtradas (sin
-        offset ni limit), por estado. Los estados sin ventas no aparecen.
+        Suma de total de TODAS las ventas filtradas (sin offset ni limit), por
+        estado. Los estados sin ventas no aparecen.
         """
         filters = self._list_filters(
             scope=scope,
@@ -164,14 +164,11 @@ class VentaRepository:
             hasta=hasta,
         )
         result = await self.db_session.execute(
-            select(Venta.estado, func.sum(Venta.total), func.sum(Venta.total_pagado))
+            select(Venta.estado, func.sum(Venta.total))
             .where(*filters)
             .group_by(Venta.estado)
         )
-        return {
-            EstadoVenta(estado): (Decimal(total), Decimal(total_pagado))
-            for estado, total, total_pagado in result.all()
-        }
+        return {EstadoVenta(estado): Decimal(total) for estado, total in result.all()}
 
     async def sum_pagos_by_metodo(
         self,

@@ -1,18 +1,19 @@
 """
 Una venta no tiene PATCH ni DELETE. Mientras está PENDIENTE se corrige con
-PUT /ventas/{id}/items, que reemplaza sus ítems y los datos no sensibles; su
-estado cambia con PATCH /ventas/{id}/estado. Una venta no se borra: se cancela.
+PUT /ventas/{id}/items, que reemplaza sus ítems y los datos no sensibles; se
+cobra con POST /ventas/{id}/confirmar y se anula con POST /ventas/{id}/cancelar.
+Una venta no se borra: se cancela.
 
-Se cobra con pagos (venta_pagos): pueden enviarse al crearla, al confirmarla o
-uno a uno con POST /venta-pagos/ mientras está pendiente. Confirmarla exige
-que esté pagada completa.
+Se cobra con pagos (venta_pagos), que pueden ser mixtos. Sin anticipos ni
+fiado: una venta PENDIENTE no tiene pagos, y todos sus pagos se envían juntos
+al cobrarla (al crearla o al confirmarla) y cubren exactamente su total.
 """
 
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from app.domains.venta_items.schemas import VentaItemCreate, VentaItemResponse
 from app.domains.venta_pagos.schemas import MAX_PAGOS_POR_VENTA, VentaPagoDetail, VentaPagoDetailCreate
@@ -63,33 +64,23 @@ def _validate_descuento(value: object) -> Decimal:
 
 class VentaCreate(BaseModel):
     """
-    Entrada de POST /ventas/. Crea la venta con todos sus ítems.
+    Entrada de POST /ventas/. Crea la venta con todos sus ítems. canal es
+    PAGINA_WEB por defecto, como un pedido del catálogo público; las demás
+    ventas deben enviar su canal. Subtotal y total los calcula el service.
 
-    estado es PENDIENTE por defecto, como un pedido de WhatsApp que aún no se
-    cobra; una venta de mostrador se envía como CONFIRMADA para cobrarla en la
-    misma petición. Subtotal y total los calcula el service.
-
-    pagos admite pagos mixtos: si la venta llega CONFIRMADA deben sumar su
-    total; si llega PENDIENTE son anticipos opcionales y no pueden superarlo.
+    El estado no se envía: lo deciden los pagos. Sin pagos la venta queda
+    PENDIENTE, como un pedido que aún no se cobra; con pagos, que pueden ser
+    mixtos, queda CONFIRMADA (venta de mostrador) y deben sumar exactamente su
+    total. No se admiten pagos parciales.
     """
 
-    estado: EstadoVenta = Field(default=EstadoVenta.PENDIENTE)
-    canal: CanalVenta = Field(default=CanalVenta.WHATSAPP)
+    canal: CanalVenta = Field(default=CanalVenta.PAGINA_WEB)
     referencia: str | None = Field(default=None, min_length=1, max_length=150)
     cliente_telefono: str | None = Field(default=None, min_length=6, max_length=20)
     descuento: Decimal = Field(default=Decimal("0"), max_digits=12, decimal_places=2)
     nota: str | None = Field(default=None, min_length=1)
     items: list[VentaItemCreate] = Field(..., min_length=1, max_length=MAX_ITEMS_POR_VENTA)
     pagos: list[VentaPagoDetailCreate] = Field(default_factory=list, max_length=MAX_PAGOS_POR_VENTA)
-
-    @field_validator("estado")
-    @classmethod
-    def validate_estado(cls, value: EstadoVenta | None) -> EstadoVenta:
-        if value is None:
-            raise ValueError("El estado no puede ser null.")
-        if value == EstadoVenta.CANCELADA:
-            raise ValueError("Una venta solo puede crearse como PENDIENTE o CONFIRMADA.")
-        return value
 
     @field_validator("canal")
     @classmethod
@@ -134,14 +125,13 @@ class VentaCreate(BaseModel):
         extra="forbid",
         json_schema_extra={
             "example": {
-                "estado": "PENDIENTE",
                 "canal": "WHATSAPP",
                 "referencia": "María López",
                 "cliente_telefono": "+59171234567",
                 "descuento": 4.8,
                 "nota": "Recoge en tienda el sábado.",
                 "items": [VentaItemCreate.model_config["json_schema_extra"]["example"]],
-                "pagos": [{"metodo": "QR", "monto": 20, "referencia": "0048213"}],
+                "pagos": [],
             }
         },
     )
@@ -154,8 +144,7 @@ class VentaItemsUpdate(BaseModel):
     items reemplaza la lista completa: los SKUs que siguen se actualizan, los
     que faltan se eliminan y los nuevos se crean. Los datos de la venta que se
     omiten no cambian; referencia, cliente_telefono y nota aceptan null para
-    quitarlos. Subtotal y total se recalculan; el nuevo total no puede quedar
-    por debajo de lo ya pagado.
+    quitarlos. Subtotal y total se recalculan.
 
     recalcular_precios, igual que al confirmar: por defecto (false) los ítems que
     ya estaban conservan el precio y los nombres con que se ofrecieron y solo
@@ -228,33 +217,28 @@ class VentaItemsUpdate(BaseModel):
     )
 
 
-class VentaEstadoUpdate(BaseModel):
+class VentaConfirmar(BaseModel):
     """
-    Entrada de PATCH /ventas/{id}/estado. CONFIRMADA cobra la venta y fija
-    confirmada_at; CANCELADA la anula y fija cancelada_at. Las transiciones
-    válidas las comprueba el service.
+    Entrada de POST /ventas/{id}/confirmar: cobra una venta PENDIENTE y fija
+    confirmada_at.
 
-    recalcular_precios solo se usa al confirmar. Por defecto (false) la venta
-    pendiente se cobra como una proforma: tal como se ofreció, con sus precios,
-    descuentos y total. true la actualiza antes de cobrar con los precios y
-    nombres del día, igual que recalcular_precios en PUT /items.
+    pagos, que pueden ser mixtos, deben sumar exactamente el total de la venta
+    (ya recalculado si se pide): sin anticipos ni fiado. Solo una venta de
+    total 0 se confirma sin pagos.
 
-    pagos también solo se usa al confirmar: cobra el saldo en la misma
-    petición. Junto con los anticipos deben sumar el total de la venta.
+    recalcular_precios: por defecto (false) la venta se cobra como una
+    proforma, tal como se ofreció, con sus precios, descuentos y total. true la
+    actualiza antes de cobrar con los precios y nombres del día, igual que
+    recalcular_precios en PUT /items.
     """
 
-    estado: EstadoVenta = Field(...)
-    recalcular_precios: bool = Field(default=False)
     pagos: list[VentaPagoDetailCreate] = Field(default_factory=list, max_length=MAX_PAGOS_POR_VENTA)
+    recalcular_precios: bool = Field(default=False)
 
-    @field_validator("estado")
+    @field_validator("pagos", mode="before")
     @classmethod
-    def validate_estado(cls, value: EstadoVenta | None) -> EstadoVenta:
-        if value is None:
-            raise ValueError("El estado no puede ser null.")
-        if value == EstadoVenta.PENDIENTE:
-            raise ValueError("El estado solo puede cambiar a CONFIRMADA o CANCELADA.")
-        return value
+    def validate_pagos_not_null(cls, value: object) -> object:
+        return _validate_pagos_not_null(value)
 
     @field_validator("recalcular_precios", mode="before")
     @classmethod
@@ -263,29 +247,15 @@ class VentaEstadoUpdate(BaseModel):
             raise ValueError("recalcular_precios no puede ser null.")
         return validator_boolean(value)
 
-    @field_validator("pagos", mode="before")
-    @classmethod
-    def validate_pagos_not_null(cls, value: object) -> object:
-        return _validate_pagos_not_null(value)
-
-    @model_validator(mode="after")
-    def validate_solo_al_confirmar(self) -> "VentaEstadoUpdate":
-        if self.estado != EstadoVenta.CONFIRMADA:
-            for field_name in ("recalcular_precios", "pagos"):
-                if field_name in self.model_fields_set:
-                    raise ValueError(f"{field_name} solo se envía al confirmar la venta.")
-        return self
-
     model_config = ConfigDict(
         extra="forbid",
         json_schema_extra={
             "example": {
-                "estado": "CONFIRMADA",
-                "recalcular_precios": True,
                 "pagos": [
                     {"metodo": "EFECTIVO", "monto": 40},
                     {"metodo": "QR", "monto": 20, "referencia": "0048219"},
                 ],
+                "recalcular_precios": True,
             }
         },
     )
@@ -348,15 +318,22 @@ class VentaResponse(BaseModel):
 class VentaResumenConfirmada(BaseModel):
     """
     Ventas confirmadas: lo cobrado con cada método, sumando sus pagos (una venta
-    con pagos mixtos aporta a varios), y total, la suma de los tres.
+    con pagos mixtos aporta a varios), y total, la suma de todos los métodos.
+    Hay un campo por cada MetodoPago: un método nuevo exige agregar su campo.
     """
 
     efectivo: Decimal
+    tarjeta: Decimal
+    cheque: Decimal
+    vales: Decimal
+    otros: Decimal
     qr: Decimal
     transferencia: Decimal
     total: Decimal
 
-    @field_serializer("efectivo", "qr", "transferencia", "total", when_used="json")
+    @field_serializer(
+        "efectivo", "tarjeta", "cheque", "vales", "otros", "qr", "transferencia", "total", when_used="json"
+    )
     def serialize_money(self, value: Decimal) -> float:
         return float(value)
 
@@ -365,24 +342,31 @@ class VentaResumen(BaseModel):
     """
     Suma de total de todas las ventas filtradas, no solo de la página. Ignora
     los filtros estado y metodo_pago para mostrar siempre el desglose completo.
-    pendiente_pagado son los anticipos ya recibidos de las ventas pendientes.
+    Las pendientes no tienen pagos: pendiente es lo que falta cobrar.
     """
 
     confirmada: VentaResumenConfirmada
     pendiente: Decimal
-    pendiente_pagado: Decimal
     cancelada: Decimal
 
-    @field_serializer("pendiente", "pendiente_pagado", "cancelada", when_used="json")
+    @field_serializer("pendiente", "cancelada", when_used="json")
     def serialize_money(self, value: Decimal) -> float:
         return float(value)
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "confirmada": {"efectivo": 800, "qr": 340, "transferencia": 0, "total": 1140},
+                "confirmada": {
+                    "efectivo": 800,
+                    "tarjeta": 120,
+                    "cheque": 0,
+                    "vales": 0,
+                    "otros": 0,
+                    "qr": 340,
+                    "transferencia": 0,
+                    "total": 1260,
+                },
                 "pendiente": 160,
-                "pendiente_pagado": 50,
                 "cancelada": 90,
             }
         },
@@ -417,8 +401,8 @@ class VentaResponseAudit(VentaResponse):
 
 class VentaDetail(VentaResponse):
     """
-    Respuesta de GET /ventas/{id}, POST, PUT /items y PATCH /estado: la venta
-    con sus ítems y sus pagos.
+    Respuesta de GET /ventas/{id}, POST, PUT /items, POST /confirmar y POST
+    /cancelar: la venta con sus ítems y sus pagos.
     """
 
     items: list[VentaItemResponse]

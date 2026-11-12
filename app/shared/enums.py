@@ -49,9 +49,17 @@ class OrdenTienda(str, Enum):
 
 
 class CanalVenta(str, Enum):
-    WHATSAPP = "WHATSAPP"
-    TIENDA = "TIENDA"
-    TIKTOK = "TIKTOK"
+    """Dónde el cliente se comprometió a comprar, no por dónde paga."""
+
+    TIENDA = "TIENDA"  # venta presencial en el local
+    WHATSAPP = "WHATSAPP"  # cliente escribe directo por WhatsApp
+    TIKTOK_LIVE = "TIKTOK_LIVE"  # venta tomada durante una transmisión en vivo
+    TIKTOK = "TIKTOK"  # DM o TikTok Shop, fuera del live
+    INSTAGRAM = "INSTAGRAM"  # DM de Instagram
+    FACEBOOK = "FACEBOOK"  # Messenger / Marketplace
+    PAGINA_WEB = "PAGINA_WEB"  # pedido desde el catálogo público
+    OTROS = "OTROS"
+
 
 
 class EstadoVenta(str, Enum):
@@ -62,6 +70,10 @@ class EstadoVenta(str, Enum):
 
 class MetodoPago(str, Enum):
     EFECTIVO = "EFECTIVO"
+    TARJETA = "TARJETA"
+    CHEQUE = "CHEQUE"
+    VALES = "VALES" 
+    OTROS = "OTROS"
     QR = "QR"
     TRANSFERENCIA = "TRANSFERENCIA"
 

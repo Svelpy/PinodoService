@@ -81,12 +81,10 @@ def test_kardex_no_se_edita_y_el_cajero_no_ve_costos() -> None:
     assert ROLE_PERMISSIONS[Role.CAJERO][Module.MOVIMIENTO_INVENTARIO] == frozenset()
 
 
-def test_pagos_de_venta_no_se_anulan_salvo_superadmin() -> None:
-    # Ningún endpoint elimina pagos; la devolución se hace cancelando la venta.
+def test_pagos_de_venta_solo_suben_comprobante_salvo_superadmin() -> None:
+    # Los pagos se registran y se leen con su venta; la devolución se hace anulando la venta.
     for role in (Role.OWNER, Role.ADMIN, Role.CAJERO):
-        assert ROLE_PERMISSIONS[role][Module.VENTA_PAGO] == frozenset(
-            {Action.CREATE, Action.READ, Action.UPDATE}
-        ), role
+        assert ROLE_PERMISSIONS[role][Module.VENTA_PAGO] == frozenset({Action.UPDATE}), role
 
 
 def test_superadmin_tiene_todas_las_acciones_en_todos_los_modulos() -> None:

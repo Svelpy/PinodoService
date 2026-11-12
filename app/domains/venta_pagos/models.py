@@ -12,8 +12,9 @@ from app.shared.enums import MetodoPago
 class VentaPago(BaseModel, table=True):
     """
     Cobro de una venta, registrado a mano (sin pasarela). Una venta puede tener
-    varios: pagos mixtos y anticipos. Un pago no se anula ni se reembolsa por
-    separado: la devolución se hace cancelando la venta completa, que devuelve
+    varios (pagos mixtos), registrados todos juntos al cobrarla y cubriendo su
+    total exacto: no hay anticipos. Un pago no se anula ni se reembolsa por
+    separado: la devolución se hace anulando la venta completa, que devuelve
     todos sus pagos en cancelada_at. Su suma se guarda en Venta.total_pagado.
     """
 
