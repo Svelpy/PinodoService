@@ -7,6 +7,7 @@ from sqlmodel import Field, Relationship
 
 from app.core.base_model import BaseModel
 from app.domains.ajustes_inventario.models import AjusteInventario
+from app.domains.skus.models import Sku
 from app.domains.ventas.models import Venta
 from app.shared.enums import TipoMovimiento
 
@@ -71,5 +72,9 @@ class MovimientoInventario(BaseModel, table=True):
     # Usuario responsable: quien registró el ajuste, confirmó o anuló la venta.
     user_id: UUID = Field(foreign_key="public.usuarios.id", nullable=False)
 
+    # Sin esta relación, SQLAlchemy no sabe que el movimiento depende del SKU y,
+    # al crear un SKU con stock en el mismo flush, inserta el movimiento antes
+    # que el SKU (ordena por nombre de módulo): falla la foreign key sku_id.
+    sku: Sku = Relationship(sa_relationship_kwargs={"lazy": "raise"})
     ajuste: AjusteInventario | None = Relationship(sa_relationship_kwargs={"lazy": "raise"})
     venta: Venta | None = Relationship(sa_relationship_kwargs={"lazy": "raise"})
