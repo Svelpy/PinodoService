@@ -45,7 +45,10 @@ class VentaRepository:
         for_update: bool = False,
         load_detail: bool = False,
     ) -> Venta | None:
-        """Con load_detail carga los ítems y pagos activos que embebe el Detail."""
+        """
+        Siempre carga los pagos activos, de los que sale metodos_pago. Con
+        load_detail carga además los ítems activos que embebe el Detail.
+        """
         statement = select(Venta).where(
             Venta.id == venta_id,
             Venta.is_deleted.is_(False),
@@ -53,11 +56,9 @@ class VentaRepository:
         )
         if for_update:
             statement = statement.with_for_update(of=Venta)
+        statement = statement.options(selectinload(Venta.pagos.and_(VentaPago.is_deleted.is_(False))))
         if load_detail:
-            statement = statement.options(
-                selectinload(Venta.items.and_(VentaItem.is_deleted.is_(False))),
-                selectinload(Venta.pagos.and_(VentaPago.is_deleted.is_(False))),
-            )
+            statement = statement.options(selectinload(Venta.items.and_(VentaItem.is_deleted.is_(False))))
 
         result = await self.db_session.execute(statement)
         return result.scalar_one_or_none()
@@ -113,8 +114,9 @@ class VentaRepository:
         hasta: datetime | None = None,
     ) -> tuple[list[Venta], int]:
         """
-        Listado paginado, de la venta más reciente a la más antigua. desde es
-        inclusivo y hasta exclusivo, ambos sobre created_at.
+        Listado paginado, de la venta más reciente a la más antigua, con sus
+        pagos activos cargados para metodos_pago. desde es inclusivo y hasta
+        exclusivo, ambos sobre created_at.
         """
         filters = self._list_filters(
             scope=scope,
@@ -134,6 +136,7 @@ class VentaRepository:
 
         result = await self.db_session.execute(
             select(Venta)
+            .options(selectinload(Venta.pagos.and_(VentaPago.is_deleted.is_(False))))
             .where(*filters)
             .order_by(Venta.numero.desc())
             .offset(offset)

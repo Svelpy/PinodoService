@@ -217,3 +217,41 @@ def test_ejemplo_de_detail_es_coherente() -> None:
     assert detail.estado == EstadoVenta.CANCELADA
     assert detail.confirmada_at is not None and detail.cancelada_at is not None
 
+
+
+# --- metodos_pago ------------------------------------------------------------
+
+
+def _venta_con_pagos(*metodos: MetodoPago) -> object:
+    from app.domains.venta_pagos.models import VentaPago
+    from app.domains.ventas.models import Venta
+
+    venta = Venta(numero=1, total=Decimal("60"), total_pagado=Decimal("60"))
+    venta.pagos = [VentaPago(venta_id=venta.id, metodo=metodo, monto=Decimal("20")) for metodo in metodos]
+    return venta
+
+
+def test_metodos_pago_sin_repetir_en_el_orden_de_los_pagos() -> None:
+    from app.domains.ventas.schemas import VentaResponse
+
+    venta = _venta_con_pagos(MetodoPago.QR, MetodoPago.EFECTIVO, MetodoPago.QR)
+
+    assert VentaResponse.model_validate(venta).metodos_pago == [MetodoPago.QR, MetodoPago.EFECTIVO]
+
+
+def test_venta_sin_pagos_tiene_metodos_pago_vacio() -> None:
+    from app.domains.ventas.schemas import VentaDetail
+
+    data = VentaDetail.model_validate(_venta_con_pagos()).model_dump(mode="json")
+
+    assert data["metodos_pago"] == []
+    assert data["pagos"] == []
+
+
+def test_detail_desde_dict_calcula_metodos_pago_de_sus_pagos() -> None:
+    from app.domains.ventas.schemas import VentaDetail
+
+    example = dict(VentaDetail.model_config["json_schema_extra"]["example"])
+    del example["metodos_pago"]
+
+    assert VentaDetail.model_validate(example).metodos_pago == [MetodoPago.QR, MetodoPago.EFECTIVO]

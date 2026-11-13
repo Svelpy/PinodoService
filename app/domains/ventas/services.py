@@ -124,6 +124,50 @@ class VentaService:
         tz = timezone(timedelta(hours=settings.TIMEZONE_OFFSET_HOURS))
         return datetime.combine(day, time.min, tzinfo=tz)
 
+    # Declarado antes de list(): en Python < 3.14, una anotación list[...]
+    # escrita después del método list de la clase falla al importar.
+    @classmethod
+    def agregar_pagos(
+        cls,
+        db_session: AsyncSession,
+        venta: Venta,
+        pagos: Sequence[VentaPagoDetailCreate],
+        actor: CurrentUser,
+        now: datetime,
+    ) -> list[VentaPago]:
+        """
+        Registra los pagos de la venta y los suma a total_pagado. Entre todos no
+        pueden superar el total; que lo cubran exacto lo exige _exigir_pagada.
+        No hace commit.
+        """
+        if not pagos:
+            return []
+        monto = sum((pago.monto for pago in pagos), Decimal("0"))
+        saldo = venta.total - venta.total_pagado
+        if monto > saldo:
+            raise cls._conflict(
+                f"Los pagos ({monto}) superan el saldo por cobrar de la venta ({max(saldo, Decimal('0'))}).",
+                "pagos",
+            )
+
+        repository = VentaPagoRepository(db_session)
+        nuevos: list[VentaPago] = []
+        for posicion, data in enumerate(pagos):
+            # Igual que los ítems: un microsegundo por posición conserva el orden enviado.
+            created_at = now + timedelta(microseconds=posicion)
+            pago = VentaPago(
+                venta_id=venta.id,
+                created_at=created_at,
+                created_by=actor.id,
+                updated_at=created_at,
+                updated_by=actor.id,
+                **data.model_dump(),
+            )
+            repository.add(pago)
+            nuevos.append(pago)
+        venta.total_pagado += monto
+        return nuevos
+
     @classmethod
     async def list(
         cls,
@@ -335,48 +379,6 @@ class VentaService:
         venta.total = venta.subtotal - venta.descuento
 
     # ------------------------------------------------------------------ pagos
-
-    @classmethod
-    def agregar_pagos(
-        cls,
-        db_session: AsyncSession,
-        venta: Venta,
-        pagos: Sequence[VentaPagoDetailCreate],
-        actor: CurrentUser,
-        now: datetime,
-    ) -> list[VentaPago]:
-        """
-        Registra los pagos de la venta y los suma a total_pagado. Entre todos no
-        pueden superar el total; que lo cubran exacto lo exige _exigir_pagada.
-        No hace commit.
-        """
-        if not pagos:
-            return []
-        monto = sum((pago.monto for pago in pagos), Decimal("0"))
-        saldo = venta.total - venta.total_pagado
-        if monto > saldo:
-            raise cls._conflict(
-                f"Los pagos ({monto}) superan el saldo por cobrar de la venta ({max(saldo, Decimal('0'))}).",
-                "pagos",
-            )
-
-        repository = VentaPagoRepository(db_session)
-        nuevos: list[VentaPago] = []
-        for posicion, data in enumerate(pagos):
-            # Igual que los ítems: un microsegundo por posición conserva el orden enviado.
-            created_at = now + timedelta(microseconds=posicion)
-            pago = VentaPago(
-                venta_id=venta.id,
-                created_at=created_at,
-                created_by=actor.id,
-                updated_at=created_at,
-                updated_by=actor.id,
-                **data.model_dump(),
-            )
-            repository.add(pago)
-            nuevos.append(pago)
-        venta.total_pagado += monto
-        return nuevos
 
     @classmethod
     def _exigir_pagada(cls, venta: Venta) -> None:

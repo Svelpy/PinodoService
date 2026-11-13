@@ -13,11 +13,11 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 from app.domains.venta_items.schemas import VentaItemCreate, VentaItemResponse
 from app.domains.venta_pagos.schemas import MAX_PAGOS_POR_VENTA, VentaPagoDetail, VentaPagoDetailCreate
-from app.shared.enums import CanalVenta, EstadoVenta
+from app.shared.enums import CanalVenta, EstadoVenta, MetodoPago
 from app.shared.schemas.pagination import PaginatedResponse
 from app.shared.services.validators import (
     validator_boolean,
@@ -261,11 +261,36 @@ class VentaConfirmar(BaseModel):
     )
 
 
+def _metodos_pago(pagos: object) -> list[object]:
+    """Métodos de los pagos, sin repetir y en el orden en que se registraron."""
+    metodos: list[object] = []
+    for pago in pagos or []:
+        metodo = pago.get("metodo") if isinstance(pago, dict) else pago.metodo
+        if metodo not in metodos:
+            metodos.append(metodo)
+    return metodos
+
+
+class _ConMetodosPago:
+    """Presenta una Venta con los métodos de sus pagos, sin añadir campos al model."""
+
+    def __init__(self, venta: object, metodos_pago: list[object]) -> None:
+        self._venta = venta
+        self.metodos_pago = metodos_pago
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._venta, name)
+
+
 class VentaResponse(BaseModel):
     """
     created_by es quien registró la venta: es un dato de negocio, no solo de
     auditoría. total_pagado es la suma de sus pagos; el saldo por cobrar es
     total - total_pagado. En una venta cancelada es lo que se devolvió.
+
+    metodos_pago son los métodos usados en sus pagos, sin repetir y en el orden
+    en que se registraron: [] si no tiene pagos (una venta pendiente). Se
+    calcula de los pagos, así que la venta debe llegar con ellos cargados.
     """
 
     id: UUID
@@ -278,12 +303,22 @@ class VentaResponse(BaseModel):
     descuento: Decimal
     total: Decimal
     total_pagado: Decimal
+    metodos_pago: list[MetodoPago]
     nota: str | None
     confirmada_at: datetime | None
     cancelada_at: datetime | None
     created_at: datetime
     created_by: UUID | None
     updated_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def add_metodos_pago(cls, data: object) -> object:
+        if isinstance(data, dict):
+            if "metodos_pago" in data:
+                return data
+            return {**data, "metodos_pago": _metodos_pago(data.get("pagos"))}
+        return _ConMetodosPago(data, _metodos_pago(data.pagos))
 
     @field_serializer("subtotal", "descuento", "total", "total_pagado", when_used="json")
     def serialize_money(self, value: Decimal) -> float:
@@ -304,6 +339,7 @@ class VentaResponse(BaseModel):
                 "descuento": 4.8,
                 "total": 80,
                 "total_pagado": 80,
+                "metodos_pago": ["QR", "EFECTIVO"],
                 "nota": "Recoge en tienda el sábado.",
                 "confirmada_at": "2026-11-07T15:00:00Z",
                 "cancelada_at": "2026-11-08T10:00:00Z",
