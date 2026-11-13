@@ -15,7 +15,7 @@ from app.domains.config.schemas import ConfigCreate
 
 logger = get_logger(__name__)
 
-SEED_CONFIG = ConfigCreate(nombre_tienda="PINODO")
+SEED_CONFIG = ConfigCreate(nombre_tienda="NOMBRE DE LA TIENDA")
 
 
 async def seed_config(settings: Settings) -> None:
