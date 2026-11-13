@@ -38,11 +38,11 @@ def _error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
     summary="Listar movimientos de inventario (kardex)",
     description=(
         "Libro de movimientos de stock, del más reciente al más antiguo. Cada "
-        "fila trae la prenda resumida (sku) y el documento que la causó (origen: "
-        "Ajuste #N con su motivo o Venta #N), con costo_total = cantidad × "
+        "fila trae la prenda resumida (sku), el documento que la causó (origen: "
+        "Ajuste #N con su motivo o Venta #N) y el usuario responsable, con costo_total = cantidad × "
         "costo_unitario y saldo_valor = saldo × costo_promedio. Con sku_id es el "
         "kardex de esa prenda. motivo filtra por el motivo del ajuste; ajuste_id "
-        "y venta_id, por documento. desde y hasta son fechas de la tienda, ambas "
+        "y venta_id, por documento; user_id, por usuario responsable. desde y hasta son fechas de la tienda, ambas "
         "incluidas. Los movimientos se registran con los ajustes "
         "(POST /ajustes-inventario/) y las ventas; no se crean ni se editan aquí."
     ),
@@ -62,7 +62,7 @@ async def list_movimientos_inventario(
     motivo: Annotated[MotivoAjuste | None, Query()] = None,
     ajuste_id: Annotated[UUID | None, Query()] = None,
     venta_id: Annotated[UUID | None, Query()] = None,
-    created_by: Annotated[UUID | None, Query()] = None,
+    user_id: Annotated[UUID | None, Query()] = None,
     desde: Annotated[date | None, Query()] = None,
     hasta: Annotated[date | None, Query()] = None,
 ) -> PaginatedResponse[MovimientoInventarioResponse]:
@@ -76,7 +76,7 @@ async def list_movimientos_inventario(
         motivo=motivo,
         ajuste_id=ajuste_id,
         venta_id=venta_id,
-        created_by=created_by,
+        user_id=user_id,
         desde=desde,
         hasta=hasta,
     )

@@ -54,17 +54,19 @@ def test_list_pasa_filtros_y_responde_sku_y_origen(
     page = PaginatedResponse[MovimientoInventarioResponse](
         total=1, page=1, per_page=20, total_pages=1, data=[_movimiento()]
     )
-    sku_id, ajuste_id = uuid4(), uuid4()
+    sku_id, ajuste_id, user_id = uuid4(), uuid4(), uuid4()
 
     with patch.object(MovimientoInventarioService, "list", new=AsyncMock(return_value=page)) as service:
         response = client.get(
-            f"/movimientos-inventario/?sku_id={sku_id}&tipo=AJUSTE&motivo=MERMA&ajuste_id={ajuste_id}&desde=2026-11-01"
+            f"/movimientos-inventario/?sku_id={sku_id}&tipo=AJUSTE&motivo=MERMA&ajuste_id={ajuste_id}&user_id={user_id}&desde=2026-11-01"
         )
 
     assert response.status_code == 200
     [fila] = response.json()["data"]
     assert fila["sku"]["producto_nombre"] == "Camisa Oxford"
     assert fila["origen"] == {"tipo": "AJUSTE", "id": fila["origen"]["id"], "numero": 12, "motivo": "RECEPCION"}
+    assert fila["usuario"]["rol"] == "ADMIN"
+    assert set(fila["usuario"]) == {"id", "nombre", "apellidos", "rol"}
     assert service.await_args.args[0] is db_session
     kwargs = service.await_args.kwargs
     assert (kwargs["sku_id"], kwargs["tipo"], kwargs["motivo"], kwargs["ajuste_id"]) == (
@@ -73,6 +75,7 @@ def test_list_pasa_filtros_y_responde_sku_y_origen(
         MotivoAjuste.MERMA,
         ajuste_id,
     )
+    assert kwargs["user_id"] == user_id
 
 
 def test_get_responde_la_fila(

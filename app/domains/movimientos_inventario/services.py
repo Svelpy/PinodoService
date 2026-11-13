@@ -17,6 +17,7 @@ from app.domains.movimientos_inventario.schemas import (
     MovimientoOrigen,
     SkuCosto,
     SkuResumen,
+    UsuarioResumen,
 )
 from app.domains.skus.models import Sku
 from app.domains.skus.repositories import SkuRepository
@@ -133,6 +134,7 @@ class MovimientoInventarioService:
             costo_promedio=sku.costo,
             ajuste_id=ajuste_id,
             venta_id=venta_id,
+            user_id=actor_id,
             created_at=now,
             created_by=actor_id,
             updated_at=now,
@@ -146,7 +148,17 @@ class MovimientoInventarioService:
     @staticmethod
     def item(row: MovimientoRow) -> MovimientoInventarioResponse:
         """Fila del kardex lista para mostrar, a partir de una fila del repository."""
-        movimiento, codigo_barras, producto_id, producto_nombre, color_nombre, talla = row
+        (
+            movimiento,
+            codigo_barras,
+            producto_id,
+            producto_nombre,
+            color_nombre,
+            talla,
+            usuario_nombre,
+            usuario_apellidos,
+            usuario_rol,
+        ) = row
         if movimiento.ajuste is not None:
             origen = MovimientoOrigen(
                 tipo="AJUSTE",
@@ -183,6 +195,12 @@ class MovimientoInventarioService:
                 talla_etiqueta=talla,
             ),
             origen=origen,
+            usuario=UsuarioResumen(
+                id=movimiento.user_id,
+                nombre=usuario_nombre,
+                apellidos=usuario_apellidos,
+                rol=usuario_rol,
+            ),
         )
 
     @classmethod
@@ -191,6 +209,13 @@ class MovimientoInventarioService:
         if row is None:
             raise AppException("Movimiento no encontrado.", 404, ErrorCode.RESOURCE_NOT_FOUND)
         return cls.item(row)
+
+    # Declarado antes de list(): en Python < 3.14, una anotación list[...]
+    # escrita después del método list de la clase falla al importar.
+    @classmethod
+    async def list_by_ajuste(cls, db_session: AsyncSession, ajuste_id: UUID) -> list[MovimientoInventarioResponse]:
+        rows = await MovimientoInventarioRepository(db_session).list_by_ajuste(ajuste_id)
+        return [cls.item(row) for row in rows]
 
     @classmethod
     async def list(
@@ -205,7 +230,7 @@ class MovimientoInventarioService:
         motivo: MotivoAjuste | None = None,
         ajuste_id: UUID | None = None,
         venta_id: UUID | None = None,
-        created_by: UUID | None = None,
+        user_id: UUID | None = None,
         desde: date | None = None,
         hasta: date | None = None,
     ) -> PaginatedResponse[MovimientoInventarioResponse]:
@@ -221,7 +246,7 @@ class MovimientoInventarioService:
             motivo=motivo,
             ajuste_id=ajuste_id,
             venta_id=venta_id,
-            created_by=created_by,
+            user_id=user_id,
             desde=cls.local_start(desde, settings) if desde is not None else None,
             hasta=cls.local_start(hasta + timedelta(days=1), settings) if hasta is not None else None,
         )
@@ -232,11 +257,6 @@ class MovimientoInventarioService:
             total_pages=(total + per_page - 1) // per_page,
             data=[cls.item(row) for row in rows],
         )
-
-    @classmethod
-    async def list_by_ajuste(cls, db_session: AsyncSession, ajuste_id: UUID) -> list[MovimientoInventarioResponse]:
-        rows = await MovimientoInventarioRepository(db_session).list_by_ajuste(ajuste_id)
-        return [cls.item(row) for row in rows]
 
     @classmethod
     async def list_costos(

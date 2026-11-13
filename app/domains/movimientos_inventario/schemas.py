@@ -14,7 +14,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, field_serializer
 
-from app.shared.enums import MotivoAjuste, TipoMovimiento
+from app.shared.enums import MotivoAjuste, Role, TipoMovimiento
 
 
 class SkuResumen(BaseModel):
@@ -70,6 +70,29 @@ class MovimientoOrigen(BaseModel):
     )
 
 
+class UsuarioResumen(BaseModel):
+    """
+    Usuario responsable del movimiento, listo para mostrar. Se resuelve aunque
+    el usuario esté eliminado, para no perder la historia del kardex.
+    """
+
+    id: UUID
+    nombre: str
+    apellidos: str | None
+    rol: Role
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "22222222-2222-4222-8222-222222222222",
+                "nombre": "Lucía",
+                "apellidos": "Pérez Gómez",
+                "rol": "ADMIN",
+            }
+        },
+    )
+
+
 class MovimientoInventarioResponse(BaseModel):
     """
     Una fila del kardex. cantidad es positiva si entra y negativa si sale;
@@ -78,7 +101,7 @@ class MovimientoInventarioResponse(BaseModel):
 
     costo_total = cantidad × costo_unitario (negativo si sale) y
     saldo_valor = saldo × costo_promedio: las columnas de un kardex valorizado.
-    created_by es quien registró el documento.
+    created_by es auditoría; usuario es el responsable del movimiento.
     """
 
     id: UUID
@@ -93,6 +116,7 @@ class MovimientoInventarioResponse(BaseModel):
     created_by: UUID | None
     sku: SkuResumen
     origen: MovimientoOrigen
+    usuario: UsuarioResumen
 
     @field_serializer("costo_unitario", "costo_total", "costo_promedio", "saldo_valor", when_used="json")
     def serialize_money(self, value: Decimal) -> float:
@@ -113,6 +137,7 @@ class MovimientoInventarioResponse(BaseModel):
                 "created_by": "22222222-2222-4222-8222-222222222222",
                 "sku": SkuResumen.model_config["json_schema_extra"]["example"],
                 "origen": MovimientoOrigen.model_config["json_schema_extra"]["example"],
+                "usuario": UsuarioResumen.model_config["json_schema_extra"]["example"],
             }
         },
     )

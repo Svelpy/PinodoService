@@ -5,12 +5,13 @@ from app.domains.movimientos_inventario.schemas import (
     MovimientoOrigen,
     SkuCosto,
     SkuResumen,
+    UsuarioResumen,
 )
 
 
 @pytest.mark.parametrize(
     "schema",
-    [SkuResumen, MovimientoOrigen, MovimientoInventarioResponse, SkuCosto],
+    [SkuResumen, MovimientoOrigen, UsuarioResumen, MovimientoInventarioResponse, SkuCosto],
 )
 def test_ejemplos_validan_su_schema(schema: type) -> None:
     example = schema.model_config["json_schema_extra"]["example"]
@@ -41,3 +42,7 @@ def test_un_movimiento_no_se_crea_ni_se_edita_por_schema() -> None:
 def test_origen_solo_ajuste_o_venta() -> None:
     with pytest.raises(ValueError):
         MovimientoOrigen.model_validate({**MovimientoOrigen.model_config["json_schema_extra"]["example"], "tipo": "SKU"})
+
+
+def test_el_usuario_del_kardex_trae_id_nombre_apellidos_y_rol() -> None:
+    assert list(UsuarioResumen.model_fields) == ["id", "nombre", "apellidos", "rol"]

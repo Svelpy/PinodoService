@@ -13,9 +13,11 @@ from app.domains.producto_colores.models import ProductoColor
 from app.domains.productos.models import Producto
 from app.domains.skus.models import Sku
 from app.domains.tallas.models import Talla
+from app.domains.usuarios.models import Usuario
 from app.shared.enums import MotivoAjuste, TipoMovimiento
 
-# Fila del kardex: (movimiento, codigo_barras, producto_id, producto_nombre, color_nombre, talla_etiqueta)
+# Fila del kardex: (movimiento, codigo_barras, producto_id, producto_nombre, color_nombre,
+# talla_etiqueta, usuario_nombre, usuario_apellidos, usuario_rol)
 MovimientoRow = tuple[Any, ...]
 
 
@@ -24,9 +26,10 @@ class MovimientoInventarioRepository:
     Acceso a datos del kardex. Los movimientos solo se agregan: no hay
     operaciones de edición ni de eliminación. No hace commit.
 
-    Las lecturas devuelven cada movimiento con los nombres de su prenda y su
-    documento de origen cargado. Los nombres no filtran eliminados: la
-    historia del kardex se conserva aunque la prenda ya no esté en el catálogo.
+    Las lecturas devuelven cada movimiento con los nombres de su prenda y de
+    su usuario, y su documento de origen cargado. Los nombres no filtran
+    eliminados: la historia del kardex se conserva aunque la prenda ya no esté
+    en el catálogo o el usuario se haya eliminado.
     """
 
     def __init__(self, db_session: AsyncSession) -> None:
@@ -42,12 +45,16 @@ class MovimientoInventarioRepository:
                 Producto.nombre,
                 Color.nombre,
                 Talla.etiqueta,
+                Usuario.nombre,
+                Usuario.apellidos,
+                Usuario.rol,
             )
             .join(Sku, MovimientoInventario.sku_id == Sku.id)
             .join(ProductoColor, Sku.producto_color_id == ProductoColor.id)
             .join(Producto, ProductoColor.producto_id == Producto.id)
             .join(Color, ProductoColor.color_id == Color.id)
             .join(Talla, Sku.talla_id == Talla.id)
+            .join(Usuario, MovimientoInventario.user_id == Usuario.id)
             .options(
                 selectinload(MovimientoInventario.ajuste),
                 selectinload(MovimientoInventario.venta),
@@ -72,7 +79,7 @@ class MovimientoInventarioRepository:
         motivo: MotivoAjuste | None = None,
         ajuste_id: UUID | None = None,
         venta_id: UUID | None = None,
-        created_by: UUID | None = None,
+        user_id: UUID | None = None,
         desde: datetime | None = None,
         hasta: datetime | None = None,
     ) -> tuple[list[MovimientoRow], int]:
@@ -96,8 +103,8 @@ class MovimientoInventarioRepository:
             filters.append(MovimientoInventario.ajuste_id == ajuste_id)
         if venta_id is not None:
             filters.append(MovimientoInventario.venta_id == venta_id)
-        if created_by is not None:
-            filters.append(MovimientoInventario.created_by == created_by)
+        if user_id is not None:
+            filters.append(MovimientoInventario.user_id == user_id)
         if desde is not None:
             filters.append(MovimientoInventario.created_at >= desde)
         if hasta is not None:

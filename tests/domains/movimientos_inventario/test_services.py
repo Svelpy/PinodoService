@@ -14,7 +14,7 @@ from app.domains.movimientos_inventario.services import MovimientoInventarioServ
 from app.domains.skus.models import Sku
 from app.domains.skus.repositories import SkuRepository
 from app.domains.ventas.models import Venta
-from app.shared.enums import MotivoAjuste, TipoMovimiento
+from app.shared.enums import MotivoAjuste, Role, TipoMovimiento
 from app.shared.errors.exceptions import AppException
 
 
@@ -67,6 +67,9 @@ def test_entrada_con_costo_sube_stock_y_recalcula_el_promedio() -> None:
     assert (movimiento.cantidad, movimiento.saldo) == (10, 20)
     assert (movimiento.costo_unitario, movimiento.costo_promedio) == (Decimal("20"), Decimal("15.00"))
     assert (movimiento.ajuste_id, movimiento.venta_id) == (ajuste_id, None)
+    # El responsable es quien registra el movimiento.
+    assert movimiento.user_id is not None
+    assert movimiento.user_id == movimiento.created_by
 
 
 @pytest.mark.parametrize("cantidad", [-3, 3])
@@ -115,7 +118,7 @@ def test_anulacion_sin_costo_conocido_usa_el_promedio_actual() -> None:
 
 
 def _row(movimiento: MovimientoInventario) -> tuple[object, ...]:
-    return (movimiento, "841", uuid4(), "Camisa Oxford", "Azul marino", "M")
+    return (movimiento, "841", uuid4(), "Camisa Oxford", "Azul marino", "M", "Lucía", None, Role.ADMIN)
 
 
 def test_item_de_un_ajuste_resume_la_prenda_y_su_documento() -> None:
@@ -128,6 +131,7 @@ def test_item_de_un_ajuste_resume_la_prenda_y_su_documento() -> None:
         costo_unitario=Decimal("13"),
         costo_promedio=Decimal("12"),
         ajuste_id=ajuste.id,
+        user_id=uuid4(),
     )
     movimiento.ajuste = ajuste
     movimiento.venta = None
@@ -137,6 +141,12 @@ def test_item_de_un_ajuste_resume_la_prenda_y_su_documento() -> None:
     assert (item.sku.id, item.sku.producto_nombre, item.sku.talla_etiqueta) == (movimiento.sku_id, "Camisa Oxford", "M")
     assert item.origen.model_dump() == {"tipo": "AJUSTE", "id": ajuste.id, "numero": 12, "motivo": MotivoAjuste.RECEPCION}
     assert (item.costo_total, item.saldo_valor) == (Decimal("312"), Decimal("432"))
+    assert item.usuario.model_dump() == {
+        "id": movimiento.user_id,
+        "nombre": "Lucía",
+        "apellidos": None,
+        "rol": Role.ADMIN,
+    }
 
 
 def test_item_de_una_venta_apunta_a_la_venta() -> None:
@@ -149,6 +159,7 @@ def test_item_de_una_venta_apunta_a_la_venta() -> None:
         costo_unitario=Decimal("12.5"),
         costo_promedio=Decimal("12.5"),
         venta_id=venta.id,
+        user_id=uuid4(),
     )
     movimiento.ajuste = None
     movimiento.venta = venta
