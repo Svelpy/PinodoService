@@ -5,7 +5,7 @@ import pytest
 
 from app.domains.config.models import Config
 from app.domains.config.repositories import ConfigRepository
-from app.domains.config.schemas import ConfigUpdate
+from app.domains.config.schemas import ConfigMantenimientoUpdate, ConfigUpdate
 from app.domains.config.services import ConfigService
 from app.integrations.cloudinary import CloudinaryService
 from app.shared.errors.exceptions import AppException
@@ -41,16 +41,47 @@ async def test_update_aplica_cambios_y_null_explicito() -> None:
     with patch.object(ConfigService, "get", new=AsyncMock(return_value=config)):
         result = await ConfigService.update(
             session,
-            ConfigUpdate(whatsapp=None, en_mantenimiento=True, horario={"Lunes": "09:00-20:00"}),
+            ConfigUpdate(whatsapp=None, horario={"Lunes": "09:00-20:00"}),
             actor_id,
             MagicMock(),
         )
 
     assert result.whatsapp is None
-    assert result.en_mantenimiento is True
     assert result.horario == {"lunes": "09:00-20:00"}
     assert result.updated_by == actor_id
     session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_set_mantenimiento_lo_activa_y_audita() -> None:
+    config = _config()
+    actor_id = uuid4()
+    session = _session()
+
+    with patch.object(ConfigService, "get", new=AsyncMock(return_value=config)) as get:
+        result = await ConfigService.set_mantenimiento(
+            session, ConfigMantenimientoUpdate(en_mantenimiento=True), actor_id
+        )
+
+    assert result.en_mantenimiento is True
+    assert result.updated_by == actor_id
+    assert get.await_args.kwargs == {"for_update": True}
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_set_mantenimiento_sin_cambio_no_hace_commit() -> None:
+    config = _config()
+    config.en_mantenimiento = False
+    session = _session()
+
+    with patch.object(ConfigService, "get", new=AsyncMock(return_value=config)):
+        result = await ConfigService.set_mantenimiento(
+            session, ConfigMantenimientoUpdate(en_mantenimiento=False), uuid4()
+        )
+
+    assert result is config
+    session.commit.assert_not_awaited()
 
 
 @pytest.mark.asyncio

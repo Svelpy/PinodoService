@@ -86,7 +86,6 @@ def test_patch_form_envia_solo_campos_presentes_y_vacio_como_null(
             "/config/",
             data={
                 "whatsapp": "",
-                "en_mantenimiento": "true",
                 "horario": '{"Lunes": "09:00-20:00"}',
             },
         )
@@ -96,13 +95,81 @@ def test_patch_form_envia_solo_campos_presentes_y_vacio_como_null(
     assert args[0] is db_session
     assert args[1].model_dump(exclude_unset=True) == {
         "whatsapp": None,
-        "en_mantenimiento": True,
         "horario": {"lunes": "09:00-20:00"},
     }
     assert args[2] == current_user.id
     assert kwargs["logo"] is None
     assert kwargs["favicon"] is None
     assert kwargs["eliminar_logo"] is False
+
+
+def test_patch_form_ignora_en_mantenimiento(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, _, _ = route_context
+
+    with patch.object(ConfigService, "update", new=AsyncMock(return_value=_config())) as service:
+        response = client.patch(
+            "/config/",
+            data={"ciudad": "Santa Cruz", "en_mantenimiento": "true"},
+        )
+
+    assert response.status_code == 200
+    assert service.await_args.args[1].model_dump(exclude_unset=True) == {"ciudad": "Santa Cruz"}
+
+
+@pytest.mark.parametrize("rol", [Role.OWNER, Role.ADMIN, Role.CAJERO])
+def test_patch_mantenimiento_rechaza_roles_que_no_son_superadmin(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+    rol: Role,
+) -> None:
+    client, current_user, _ = route_context
+    current_user.rol = rol
+
+    with patch.object(ConfigService, "set_mantenimiento", new=AsyncMock()) as service:
+        response = client.patch("/config/mantenimiento", json={"en_mantenimiento": True})
+
+    assert response.status_code == 403
+    service.assert_not_awaited()
+
+
+def test_patch_mantenimiento_superadmin(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+) -> None:
+    client, current_user, db_session = route_context
+    current_user.rol = Role.SUPERADMIN
+    config = _config()
+    config.en_mantenimiento = True
+
+    with patch.object(
+        ConfigService, "set_mantenimiento", new=AsyncMock(return_value=config)
+    ) as service:
+        response = client.patch("/config/mantenimiento", json={"en_mantenimiento": True})
+
+    assert response.status_code == 200
+    assert response.json()["en_mantenimiento"] is True
+    args = service.await_args.args
+    assert args[0] is db_session
+    assert args[1].en_mantenimiento is True
+    assert args[2] == current_user.id
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{}, {"en_mantenimiento": None}, {"en_mantenimiento": True, "ciudad": "X"}],
+)
+def test_patch_mantenimiento_rechaza_body_invalido(
+    route_context: tuple[TestClient, CurrentUser, MagicMock],
+    body: dict[str, object],
+) -> None:
+    client, current_user, _ = route_context
+    current_user.rol = Role.SUPERADMIN
+
+    with patch.object(ConfigService, "set_mantenimiento", new=AsyncMock()) as service:
+        response = client.patch("/config/mantenimiento", json=body)
+
+    assert response.status_code == 422
+    service.assert_not_awaited()
 
 
 def test_patch_form_rechaza_vaciar_nombre_tienda(

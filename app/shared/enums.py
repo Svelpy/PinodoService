@@ -22,6 +22,7 @@ class Module(str, Enum):
     VENTA = "VENTA"
     VENTA_PAGO = "VENTA_PAGO"
     MOVIMIENTO_INVENTARIO = "MOVIMIENTO_INVENTARIO"
+    FINANZAS = "FINANZAS"
 
 
 class Action(str, Enum):

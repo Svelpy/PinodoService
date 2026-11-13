@@ -5,6 +5,7 @@ from app.domains.auth.routes import router as auth_router
 from app.domains.categorias.routes import router as categorias_router
 from app.domains.colores.routes import router as colores_router
 from app.domains.config.routes import router as config_router
+from app.domains.finanzas.routes import router as finanzas_router
 from app.domains.imagenes.routes import router as imagenes_router
 from app.domains.ajustes_inventario.routes import router as ajustes_inventario_router
 from app.domains.movimientos_inventario.routes import router as movimientos_inventario_router
@@ -35,6 +36,7 @@ no_system_router.include_router(movimientos_inventario_router)
 no_system_router.include_router(ajustes_inventario_router)
 no_system_router.include_router(ventas_router)
 no_system_router.include_router(venta_pagos_router)
+no_system_router.include_router(finanzas_router)
 no_system_router.include_router(tienda_router)
 
 

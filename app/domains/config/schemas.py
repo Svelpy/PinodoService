@@ -156,7 +156,6 @@ class ConfigUpdate(BaseModel):
         default=None,
         description=REDES_SOCIALES_DESCRIPTION,
     )
-    en_mantenimiento: bool | None = Field(default=None)
 
     @field_validator("nombre_tienda", mode="before")
     @classmethod
@@ -214,13 +213,6 @@ class ConfigUpdate(BaseModel):
             raise ValueError("Las redes sociales no pueden quedar vacías; usa {} para borrarlas.")
         return validator_social_links(validator_json_object(value))
 
-    @field_validator("en_mantenimiento", mode="before")
-    @classmethod
-    def validate_en_mantenimiento(cls, value: object) -> bool:
-        if value is None:
-            raise ValueError("El modo mantenimiento no puede ser null.")
-        return validator_boolean(value)
-
     model_config = ConfigDict(
         extra="forbid",
         json_schema_extra={
@@ -235,9 +227,26 @@ class ConfigUpdate(BaseModel):
                 "ciudad": "Santa Cruz",
                 "horario": {"lunes": "09:00-21:00"},
                 "redes_sociales": {"instagram": "https://instagram.com/tiendamoda"},
-                "en_mantenimiento": True,
             }
         },
+    )
+
+
+class ConfigMantenimientoUpdate(BaseModel):
+    """Body del PATCH /config/mantenimiento, exclusivo de SUPERADMIN."""
+
+    en_mantenimiento: bool
+
+    @field_validator("en_mantenimiento", mode="before")
+    @classmethod
+    def validate_en_mantenimiento(cls, value: object) -> bool:
+        if value is None:
+            raise ValueError("El modo mantenimiento no puede ser null.")
+        return validator_boolean(value)
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": {"en_mantenimiento": True}},
     )
 
 

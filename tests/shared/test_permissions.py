@@ -59,7 +59,7 @@ def test_cajero_solo_lee_y_no_gestiona_usuarios() -> None:
     cajero = ROLE_PERMISSIONS[Role.CAJERO]
     assert cajero[Module.USUARIO] == frozenset()
     for module, actions in cajero.items():
-        if module not in {Module.USUARIO, Module.VENTA, Module.VENTA_PAGO, Module.MOVIMIENTO_INVENTARIO}:
+        if module not in {Module.USUARIO, Module.VENTA, Module.VENTA_PAGO, Module.MOVIMIENTO_INVENTARIO, Module.FINANZAS}:
             assert actions == frozenset({Action.READ}), module
 
 
@@ -125,3 +125,11 @@ def test_las_rutas_de_auditoria_exigen_la_accion_audit() -> None:
             for cell in (getattr(dependency.call, "__closure__", None) or ())
         ]
         assert Action.AUDIT in closures, route.path
+
+
+def test_finanzas_solo_la_leen_los_roles_superiores() -> None:
+    # Los reportes muestran costos y totales de la tienda: el cajero no los ve.
+    for role in (Role.OWNER, Role.ADMIN):
+        assert ROLE_PERMISSIONS[role][Module.FINANZAS] == frozenset({Action.READ}), role
+    assert Action.READ in ROLE_PERMISSIONS[Role.SUPERADMIN][Module.FINANZAS]
+    assert ROLE_PERMISSIONS[Role.CAJERO][Module.FINANZAS] == frozenset()

@@ -8,7 +8,7 @@ from app.core.config import Settings
 from app.core.logging import get_logger
 from app.domains.config.models import Config
 from app.domains.config.repositories import ConfigRepository
-from app.domains.config.schemas import ConfigUpdate
+from app.domains.config.schemas import ConfigMantenimientoUpdate, ConfigUpdate
 from app.integrations.cloudinary import CloudinaryService
 from app.shared.errors.codes import ErrorCode
 from app.shared.errors.exceptions import AppException
@@ -118,4 +118,28 @@ class ConfigService:
             await CloudinaryService.safe_delete_image(url)
 
         logger.info("Configuración actualizada: actor_id=%s", actor_id)
+        return config
+
+    @classmethod
+    async def set_mantenimiento(
+        cls,
+        db_session: AsyncSession,
+        data: ConfigMantenimientoUpdate,
+        actor_id: UUID,
+    ) -> Config:
+        """Activa o desactiva el modo mantenimiento de la tienda pública."""
+        config = await cls.get(db_session, for_update=True)
+        if config.en_mantenimiento == data.en_mantenimiento:
+            return config
+
+        config.en_mantenimiento = data.en_mantenimiento
+        config.updated_at = utc_now()
+        config.updated_by = actor_id
+        await cls._commit(db_session, config)
+
+        logger.info(
+            "Modo mantenimiento=%s: actor_id=%s",
+            data.en_mantenimiento,
+            actor_id,
+        )
         return config

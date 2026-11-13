@@ -28,6 +28,7 @@ ROLE_PERMISSIONS: dict[Role, dict[Module, frozenset[Action]]] = {
         Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),  # DELETE = anular una venta confirmada
         Module.VENTA_PAGO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
         Module.MOVIMIENTO_INVENTARIO: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
+        Module.FINANZAS: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE, Action.AUDIT}),
     },
     # Dueño de la tienda. La auditoría (AUDIT) queda para SUPERADMIN.
     Role.OWNER: {
@@ -44,6 +45,7 @@ ROLE_PERMISSIONS: dict[Role, dict[Module, frozenset[Action]]] = {
         Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE, Action.DELETE}),  # DELETE = anular una venta confirmada
         Module.VENTA_PAGO: frozenset({Action.UPDATE}),  # los pagos se registran y se leen con su venta; UPDATE solo sube el comprobante; un pago no se anula: se anula la venta
         Module.MOVIMIENTO_INVENTARIO: frozenset({Action.CREATE, Action.READ}),  # el kardex no se edita ni se elimina: se corrige con otro AJUSTE
+        Module.FINANZAS: frozenset({Action.READ}),  # reportes de solo lectura
     },
     # Encargado que administra la tienda por el dueño. No elimina (DELETE) en ningún módulo.
     Role.ADMIN: {
@@ -60,6 +62,7 @@ ROLE_PERMISSIONS: dict[Role, dict[Module, frozenset[Action]]] = {
         Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),  # sin DELETE: no anula ventas confirmadas
         Module.VENTA_PAGO: frozenset({Action.UPDATE}),  # los pagos se registran y se leen con su venta; UPDATE solo sube el comprobante; un pago no se anula: se anula la venta
         Module.MOVIMIENTO_INVENTARIO: frozenset({Action.CREATE, Action.READ}),  # el kardex no se edita ni se elimina: se corrige con otro AJUSTE
+        Module.FINANZAS: frozenset({Action.READ}),  # reportes de solo lectura
     },
     # Atiende la caja: registra ventas y consulta el catálogo, precios y stock sin modificarlos.
     Role.CAJERO: {
@@ -76,6 +79,7 @@ ROLE_PERMISSIONS: dict[Role, dict[Module, frozenset[Action]]] = {
         Module.VENTA: frozenset({Action.CREATE, Action.READ, Action.UPDATE}),  # cobra y cancela pendientes; anular una venta confirmada (DELETE) y la auditoría quedan para roles superiores
         Module.VENTA_PAGO: frozenset({Action.UPDATE}),  # los pagos se registran y se leen con su venta; UPDATE solo sube el comprobante; un pago no se anula: se anula la venta
         Module.MOVIMIENTO_INVENTARIO: frozenset(),  # no ve costos ni mueve stock: las ventas lo mueven solas
+        Module.FINANZAS: frozenset(),  # no ve los totales de la tienda ni los costos
     },
 }
 

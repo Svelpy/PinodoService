@@ -2,7 +2,13 @@ import pytest
 from pydantic import ValidationError
 
 from app.domains.config.models import Config
-from app.domains.config.schemas import ConfigCreate, ConfigResponse, ConfigResponseAudit, ConfigUpdate
+from app.domains.config.schemas import (
+    ConfigCreate,
+    ConfigMantenimientoUpdate,
+    ConfigResponse,
+    ConfigResponseAudit,
+    ConfigUpdate,
+)
 
 
 def test_config_create_minima_con_valores_por_defecto() -> None:
@@ -43,10 +49,26 @@ def test_config_create_rechaza_datos_invalidos(overrides: dict[str, object]) -> 
         ConfigCreate.model_validate({"nombre_tienda": "Tienda Moda", **overrides})
 
 
-@pytest.mark.parametrize("field", ["nombre_tienda", "horario", "redes_sociales", "en_mantenimiento"])
+@pytest.mark.parametrize("field", ["nombre_tienda", "horario", "redes_sociales"])
 def test_config_update_rechaza_null_en_campos_no_nullable(field: str) -> None:
     with pytest.raises(ValidationError):
         ConfigUpdate.model_validate({field: None})
+
+
+def test_config_update_no_admite_en_mantenimiento() -> None:
+    with pytest.raises(ValidationError):
+        ConfigUpdate.model_validate({"en_mantenimiento": True})
+
+
+@pytest.mark.parametrize("value", [None, "quizas"])
+def test_config_mantenimiento_update_rechaza_valores_invalidos(value: object) -> None:
+    with pytest.raises(ValidationError):
+        ConfigMantenimientoUpdate.model_validate({"en_mantenimiento": value})
+
+
+def test_config_mantenimiento_update_rechaza_campos_extra() -> None:
+    with pytest.raises(ValidationError):
+        ConfigMantenimientoUpdate.model_validate({"en_mantenimiento": True, "nombre_tienda": "X"})
 
 
 def test_config_update_permite_limpiar_campos_nullable() -> None:
